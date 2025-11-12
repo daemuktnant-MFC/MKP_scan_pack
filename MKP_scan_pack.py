@@ -4,13 +4,12 @@ import io
 from datetime import datetime
 from streamlit.connections import SQLConnection
 from streamlit_qrcode_scanner import qrcode_scanner
-import uuid # ใช้สำหรับสร้าง ID ชั่วคราวให้ปุ่มลบ
+import uuid 
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
 st.set_page_config(page_title="Box Scanner", layout="wide")
 st.title("📦 App สแกน Tracking และ Barcode")
 
-# เชื่อมต่อ Supabase (เหมือนเดิม)
 @st.cache_resource
 def init_supabase_connection():
     return st.connection("supabase", type=SQLConnection)
@@ -22,55 +21,42 @@ if "current_user" not in st.session_state:
     st.session_state.current_user = ""
 if "scan_count" not in st.session_state:
     st.session_state.scan_count = 0
-
-# (ใหม่) สร้างตัวแปรสำหรับพักค่าที่สแกนได้ชั่วคราว
 if "temp_tracking" not in st.session_state:
     st.session_state.temp_tracking = ""
 if "temp_barcode" not in st.session_state:
     st.session_state.temp_barcode = ""
-
-# (ใหม่) สร้าง "รายการ" สำหรับพักข้อมูลทั้งหมดก่อนบันทึก
 if "staged_scans" not in st.session_state:
-    st.session_state.staged_scans = [] # จะเป็น List ของ Dict
+    st.session_state.staged_scans = []
+
+# (ใหม่) สร้าง State สำหรับควบคุม Popup
+if "show_modal" not in st.session_state:
+    st.session_state.show_modal = False
 
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
+# (ฟังก์ชัน add_to_stage, delete_item, save_all_to_db เหมือนเดิม 100%)
 
 def add_to_stage():
-    """
-    ฟังก์ชันสำหรับปุ่ม 'เพิ่มลงในรายการ'
-    จะย้ายข้อมูลจาก temp ไปเก็บใน staged_scans
-    """
     if st.session_state.temp_tracking and st.session_state.temp_barcode:
         st.session_state.staged_scans.append({
-            "id": str(uuid.uuid4()), # สร้าง ID เฉพาะกิจสำหรับปุ่มลบ
+            "id": str(uuid.uuid4()),
             "tracking": st.session_state.temp_tracking,
             "barcode": st.session_state.temp_barcode
         })
-        # ล้างค่าในช่องพักข้อมูล
         st.session_state.temp_tracking = ""
         st.session_state.temp_barcode = ""
     else:
         st.warning("กรุณาสแกนให้ครบทั้ง Tracking และ Barcode ก่อนเพิ่ม")
 
 def delete_item(item_id_to_delete):
-    """
-    ฟังก์ชันสำหรับปุ่ม 'ลบ' (Concept ข้อ 5)
-    จะลบรายการที่มี id ตรงกันออกจาก staged_scans
-    """
     st.session_state.staged_scans = [
         item for item in st.session_state.staged_scans 
         if item["id"] != item_id_to_delete
     ]
 
 def save_all_to_db():
-    """
-    ฟังก์ชันสำหรับปุ่ม 'บันทึกทั้งหมด'
-    จะนำทุกอย่างใน staged_scans บันทึกลง Supabase
-    """
     if not st.session_state.staged_scans:
         st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
         return
-
     try:
         data_to_insert = []
         current_time = datetime.now()
@@ -83,10 +69,7 @@ def save_all_to_db():
                 "created_at": current_time
             })
         
-        # แปลงเป็น DataFrame
         df_to_insert = pd.DataFrame(data_to_insert)
-        
-        # บันทึกลง Supabase (วิธีที่เร็วที่สุด)
         df_to_insert.to_sql(
             "scans", 
             con=supabase_conn.engine, 
@@ -96,20 +79,16 @@ def save_all_to_db():
         
         saved_count = len(st.session_state.staged_scans)
         st.session_state.scan_count += saved_count
-        
-        # ล้างรายการที่พักไว้
         st.session_state.staged_scans = []
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
         st.rerun()
-
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
-
 
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (ออกแบบใหม่ทั้งหมด) ---
+# --- TAB 1: หน้าสแกน (ปรับปรุง Logic สแกน + เพิ่ม Popup) ---
 with tab1:
     st.header("บันทึกการสแกน")
 
@@ -119,27 +98,57 @@ with tab1:
     if not user:
         st.warning("กรุณาป้อนชื่อผู้ใช้งานก่อนเริ่มสแกน")
     else:
+        
+        # --- (ใหม่) Logic การแสดง Popup (Modal) ---
+        if st.session_state.show_modal:
+            with st.modal("✅ สแกน Tracking สำเร็จ"):
+                st.info("กรุณายืนยัน Tracking Number ที่สแกนได้:")
+                st.code(st.session_state.temp_tracking)
+                st.write("---")
+                st.warning("ขั้นต่อไป: กรุณากด 'ปิด' แล้วสแกน Barcode ครับ")
+                
+                # ปุ่ม 'ปิด' ที่คุณต้องการ
+                if st.button("ปิด (และเตรียมสแกน Barcode)"):
+                    st.session_state.show_modal = False
+                    st.rerun()
+
         # --- ส่วนที่ 1: กล้องสแกน (ใช้จุดเดียว) ---
         st.subheader("1. สแกนที่นี่ (Scan Here)")
         
-        # (Concept ข้อ 1) ใช้กล้องตัวเดียว
-        scan_value = qrcode_scanner(key="main_scanner")
-
-        # (Concept ข้อ 2 & 3) Logic การสแกน
-        if scan_value:
+        # เราจะแสดง Scanner ก็ต่อเมื่อ Popup ปิดอยู่เท่านั้น
+        if not st.session_state.show_modal:
+            
+            # (ใหม่) แสดงคำแนะนำตามขั้นตอน
             if not st.session_state.temp_tracking:
-                # Scan ครั้งแรก -> บันทึกที่ Tracking
-                st.session_state.temp_tracking = scan_value
-                st.rerun() # สั่งให้หน้าจออัปเดตทันที
-            elif not st.session_state.temp_barcode:
-                # Scan ครั้งที่ 2 -> บันทึกที่ Barcode
-                st.session_state.temp_barcode = scan_value
-                st.rerun() # สั่งให้หน้าจออัปเดตทันที
+                st.info("ขั้นตอนที่ 1: กรุณาสแกน Tracking...")
             else:
-                # ถ้าสแกนครั้งที่ 3 (ทั้งที่ยังไม่กดเพิ่ม) ให้เตือน
-                st.warning("กรุณากด 'เพิ่มลงในรายการ' ก่อนสแกนกล่องถัดไป")
+                st.success("ขั้นตอนที่ 2: กรุณาสแกน Barcode...")
 
-        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว ---
+            scan_value = qrcode_scanner(key="main_scanner")
+
+            if scan_value:
+                # Logic 1: สแกน Tracking (ถ้าช่อง temp_tracking ว่าง)
+                if not st.session_state.temp_tracking:
+                    st.session_state.temp_tracking = scan_value
+                    st.session_state.show_modal = True # <--- สั่งให้เปิด Popup
+                    st.rerun() 
+                
+                # Logic 2: สแกน Barcode (ถ้า temp_tracking มีค่าแล้ว และ modal ปิดแล้ว)
+                elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
+                    # ป้องกันการสแกน tracking ซ้ำ (เผื่อผู้ใช้สแกนเร็ว)
+                    if scan_value != st.session_state.temp_tracking:
+                        st.session_state.temp_barcode = scan_value
+                        st.rerun()
+                    
+                elif st.session_state.temp_tracking and st.session_state.temp_barcode:
+                    st.warning("กรุณากด 'เพิ่มลงในรายการ' ก่อนสแกนกล่องถัดไป")
+        
+        else:
+            # ขณะที่ Modal เปิดอยู่ ให้แสดงข้อความนี้แทนที่ Scanner
+            st.info("... กรุณากด 'ปิด' ใน Popup เพื่อสแกน Barcode ต่อ ...")
+
+
+        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว (เหมือนเดิม) ---
         st.subheader("2. ข้อมูลที่รอเพิ่ม")
         col1, col2, col3 = st.columns([3, 3, 1])
         
@@ -156,31 +165,26 @@ with tab1:
                       type="secondary",
                       use_container_width=True,
                       on_click=add_to_stage,
-                      # ปิดปุ่มไว้ถ้ายังสแกนไม่ครบ
                       disabled=(not st.session_state.temp_tracking or not st.session_state.temp_barcode)
                      )
 
         st.divider()
 
-        # --- ส่วนที่ 3: ตารางพักข้อมูล (Staging Area) ---
+        # --- ส่วนที่ 3: ตารางพักข้อมูล (Staging Area) (เหมือนเดิม) ---
         st.subheader(f"3. รายการที่รอ C ({len(st.session_state.staged_scans)} รายการ)")
-        
-        # (Concept ข้อ 2) แสดงยอดรวมกล่องที่ Scan (ในรายการ)
         st.metric("จำนวนกล่องที่สแกน (ในรอบนี้)", st.session_state.scan_count)
 
-        # สร้าง Header ของตาราง
         h_col1, h_col2, h_col3 = st.columns([3, 3, 1])
         h_col1.markdown("**Tracking**")
         h_col2.markdown("**Barcode**")
         h_col3.markdown("**ลบ**")
 
-        # (Concept ข้อ 4 & 5) แสดงผลตารางพร้อมปุ่มลบ
         if not st.session_state.staged_scans:
             st.info("ยังไม่มีรายการสแกน กรุณาสแกน Tracking และ Barcode")
         else:
             for item in st.session_state.staged_scans:
                 r_col1, r_col2, r_col3 = st.columns([3, 3, 1])
-                r_col1.code(item["tracking"]) # ใช้ .code() เพื่อให้อ่านง่าย
+                r_col1.code(item["tracking"])
                 r_col2.code(item["barcode"])
                 r_col3.button("❌ ลบ", 
                               key=f"del_{item['id']}", 
@@ -189,56 +193,44 @@ with tab1:
                               use_container_width=True
                              )
         
-        # ปุ่มบันทึกข้อมูลทั้งหมด
         st.button("💾 บันทึกทั้งหมดลง Database",
                   type="primary",
                   use_container_width=True,
                   on_click=save_all_to_db,
-                  disabled=(not st.session_state.staged_scans) # ปิดปุ่มถ้าไม่มีอะไรให้บันทึก
+                  disabled=(not st.session_state.staged_scans)
                  )
 
 
 # --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เหมือนเดิมทุกประการ) ---
 with tab2:
     st.header("ค้นหาและดาวน์โหลดข้อมูล")
-
+    # (Code ทั้งหมดใน Tab 2 เหมือนเดิมครับ)
     with st.expander("ตัวกรองข้อมูล (Filter)", expanded=True):
         col_f1, col_f2 = st.columns(2)
-        
         with col_f1:
             filter_user = st.text_input("กรองตาม User (เว้นว่างเพื่อแสดงทั้งหมด)")
         with col_f2:
             filter_date = st.date_input("กรองตามวันที่", value=None) 
-
     try:
-        # สร้าง Query เพื่อดึงข้อมูล
         query = "SELECT * FROM scans"
         filters = []
         params = {}
-
         if filter_user:
             filters.append("user_id = :user")
             params["user"] = filter_user
         if filter_date:
             filters.append("DATE(created_at) = :date")
             params["date"] = filter_date
-
         if filters:
             query += " WHERE " + " AND ".join(filters)
-        
         query += " ORDER BY created_at DESC"
-
         data_df = supabase_conn.query(query, params=params)
-
         if not data_df.empty:
             st.dataframe(data_df, use_container_width=True)
-            
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
                 return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-
             csv_data = convert_df_to_csv(data_df)
-            
             st.download_button(
                 label="📥 Download ข้อมูลเป็น CSV",
                 data=csv_data,
@@ -247,6 +239,5 @@ with tab2:
             )
         else:
             st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
-            
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
