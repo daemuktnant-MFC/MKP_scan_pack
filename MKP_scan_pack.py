@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_barcode_scanner import barcode_scanner # ตัวสแกน
+from streamlit_camera_barcode_reader import camera_barcode_reader as barcode_scanner # ตัวสแกน
 from supabase import create_client, Client
 import pandas as pd
 import io
