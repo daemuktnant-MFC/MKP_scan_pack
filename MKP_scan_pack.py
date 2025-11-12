@@ -2,10 +2,15 @@ import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
 import io
-import cv2  # <--- เพิ่มมาใหม่
-import numpy as np # <--- เพิ่มมาใหม่
-from pyzbar.pyzbar import decode # <--- เพิ่มมาใหม่
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoTransformerBase # <--- เพิ่มมาใหม่
+import cv2
+import numpy as np
+from pyzbar.pyzbar import decode
+import av  # <-- Library ใหม่สำหรับ Video Frame
+from streamlit_webrtc import (
+    webrtc_streamer, 
+    WebRtcMode, 
+    VideoProcessorBase  # <-- Class ใหม่
+)
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
 st.set_page_config(page_title="Box Scanner", layout="wide")
@@ -29,61 +34,46 @@ if "scan_count" not in st.session_state:
 if "current_user" not in st.session_state:
     st.session_state.current_user = ""
 
-# --- 3. สร้าง Class สำหรับถอดรหัส Barcode (หัวใจของวิธีใหม่) ---
-# เราจะสร้าง 2 Class แยกกันสำหรับ Tracking และ Barcode
-# เพื่อให้มันไม่เขียนทับค่าของกันและกัน
+# --- 3. สร้าง Class สำหรับถอดรหัส (เวอร์ชันใหม่ ใช้ recv()) ---
+# เราจะใช้ Class เดียว แต่ส่ง "key" ที่ต่างกันไป
+class BarcodeProcessor(VideoProcessorBase):
+    def __init__(self, session_state_key):
+        self.session_state_key = session_state_key
+        self.found_code = ""
 
-class TrackingScanner(VideoTransformerBase):
-    def __init__(self):
-        self.found_code = None
-
-    def transform(self, frame):
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        # แปลง frame จากกล้องเป็นภาพที่ cv2 รู้จัก
         img = frame.to_ndarray(format="bgr24")
         
         # ถอดรหัส Barcode/QR Code
         barcodes = decode(img)
         
         if barcodes:
+            # ดึงค่าที่สแกนได้
             data = barcodes[0].data.decode("utf-8")
-            # เมื่อสแกนเจอ ให้เก็บค่าใน session_state ทันที
-            st.session_state.tracking_code = data
-            self.found_code = data
-
-        # วาดสี่เหลี่ยมรอบ Barcode ที่เจอ (ถ้าเจอ)
-        if self.found_code:
-            # ใส่ข้อความบนจอว่าสแกนเจอแล้ว
-            cv2.putText(img, f"Found: {self.found_code}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-        return img
-
-class ProductScanner(VideoTransformerBase):
-    def __init__(self):
-        self.found_code = None
-
-    def transform(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        
-        barcodes = decode(img)
-        
-        if barcodes:
-            data = barcodes[0].data.decode("utf-8")
-            st.session_state.product_barcode = data
-            self.found_code = data
-
-        if self.found_code:
-            cv2.putText(img, f"Found: {self.found_code}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
-        return img
+            # อัปเดตค่าใน session_state โดยใช้ key ที่เราส่งเข้ามา
+            if getattr(st.session_state, self.session_state_key) != data:
+                setattr(st.session_state, self.session_state_key, data)
+                self.found_code = data
+        
+        # วาดข้อความบนจอ (ถ้าเจอ)
+        if self.found_code:
+            cv2.putText(img, f"Found: {self.found_code}", 
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # ส่งภาพที่ประมวลผลแล้วกลับไปแสดงผล
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
-tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
+tab1, tab2 = st.tabs(["📷 สแกนกล้อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
 # --- TAB 1: หน้าสแกน ---
 with tab1:
     st.header("บันทึกการสแกน")
 
     user = st.text_input("ชื่อผู้ใช้งาน (User):", st.session_state.current_user)
-    st.session_state.current_user = user # อัปเดต User ใน state
+    st.session_state.current_user = user 
 
     if not user:
         st.warning("กรุณาป้อนชื่อผู้ใช้งานก่อนเริ่มสแกน")
@@ -91,23 +81,24 @@ with tab1:
         st.metric("จำนวนกล่องที่สแกน (ในรอบนี้)", st.session_state.scan_count)
         
         col1, col2 = st.columns(2)
+        
+        # กำหนดค่า STUN server (ตัวกลางเชื่อมต่อ)
+        RTC_CONFIG = {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
 
         # --- ส่วนสแกน Tracking (QR Code) ---
         with col1:
             st.subheader("1. สแกน Tracking (QR Code)")
             
-            # เปิดกล้องด้วย webrtc_streamer
             webrtc_streamer(
                 key="tracking_scanner",
                 mode=WebRtcMode.SENDONLY,
-                video_processor_factory=TrackingScanner, # <--- แก้เป็น _processor_
+                # ใช้ Factory ใหม่ที่รองรับ recv()
+                video_processor_factory=lambda: BarcodeProcessor(session_state_key="tracking_code"),
                 media_stream_constraints={"video": True, "audio": False},
                 async_processing=True,
-                # เพิ่มบรรทัดนี้เข้าไปครับ
-                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+                rtc_configuration=RTC_CONFIG # <-- เพิ่มตัวกลางเชื่อมต่อ
             )
             
-            # แสดงผลค่าที่สแกนได้จาก session_state
             if st.session_state.tracking_code:
                 st.success(f"Tracking ที่สแกนได้: **{st.session_state.tracking_code}**")
 
@@ -118,11 +109,11 @@ with tab1:
             webrtc_streamer(
                 key="product_scanner",
                 mode=WebRtcMode.SENDONLY,
-                video_processor_factory=ProductScanner, # <--- แก้เป็น _processor_
+                # ใช้ Factory เดียวกัน แต่ส่ง key คนละตัว
+                video_processor_factory=lambda: BarcodeProcessor(session_state_key="product_barcode"),
                 media_stream_constraints={"video": True, "audio": False},
                 async_processing=True,
-                # เพิ่มบรรทัดนี้เข้าไปครับ
-                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+                rtc_configuration=RTC_CONFIG # <-- เพิ่มตัวกลางเชื่อมต่อ
             )
             
             if st.session_state.product_barcode:
@@ -130,7 +121,7 @@ with tab1:
 
         st.divider()
 
-        # --- ส่วนบันทึกข้อมูล (เหมือนเดิม) ---
+        # --- ส่วนบันทึกข้อมูล ---
         if st.session_state.tracking_code and st.session_state.product_barcode:
             if st.button("💾 บันทึกข้อมูลกล่องนี้", type="primary", use_container_width=True):
                 try:
@@ -145,7 +136,6 @@ with tab1:
                     st.success("บันทึกข้อมูลสำเร็จ!")
                     st.session_state.scan_count += 1
                     
-                    # เคลียร์ค่าเพื่อรอสแกนกล่องต่อไป
                     st.session_state.tracking_code = ""
                     st.session_state.product_barcode = ""
                     
@@ -154,7 +144,7 @@ with tab1:
                 except Exception as e:
                     st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
         else:
-            st.info("กรุณาสแกนทั้ง Tracking และ Barcode ให้ครบถ้วนก่อนบันทึก (ค่าที่สแกนได้จะแสดงใต้กล้อง)")
+            st.info("กรุณาสแกนทั้ง Tracking และ Barcode ให้ครบถ้วน (ค่าที่สแกนได้จะแสดงใต้กล้อง)")
 
 # --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เหมือนเดิม) ---
 with tab2:
