@@ -3,3 +3,4 @@ pandas
 streamlit-qrcode-scanner
 psycopg2-binary
 sqlalchemy
+pytz
