@@ -1,4 +1,4 @@
 streamlit
 supabase
-streamlit-barcode-scanner
+streamlit_barcode_scanner
 pandas
