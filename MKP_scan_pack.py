@@ -99,15 +99,16 @@ with tab1:
         
         # --- (ใหม่) Logic การแสดง Popup (Modal) ---
         if st.session_state.show_modal:
-            with st.modal("✅ สแกน Tracking สำเร็จ"):
+            @st.dialog("✅ สแกน Tracking สำเร็จ")
+            def show_tracking_modal():
                 st.info("กรุณายืนยัน Tracking Number ที่สแกนได้:")
                 st.code(st.session_state.temp_tracking)
-                st.write("---")
                 st.warning("ขั้นต่อไป: กรุณากด 'ปิด' แล้วสแกน Barcode ครับ")
-                
                 if st.button("ปิด (และเตรียมสแกน Barcode)"):
                     st.session_state.show_modal = False
                     st.rerun()
+            show_tracking_modal()
+
 
         # --- ส่วนที่ 1: กล้องสแกน (ใช้จุดเดียว) ---
         st.subheader("1. สแกนที่นี่ (Scan Here)")
