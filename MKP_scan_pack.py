@@ -57,10 +57,8 @@ def save_all_to_db():
         return
     try:
         data_to_insert = []
-        from datetime import datetime, timedelta, timezone
-
-        # ตั้งค่า timezone ให้เป็นประเทศไทย (UTC+7)
-        THAI_TZ = timezone(timedelta(hours=7))
+        import pytz
+        THAI_TZ = pytz.timezone("Asia/Bangkok")
         current_time = datetime.now(THAI_TZ)
         
         for item in st.session_state.staged_scans:
