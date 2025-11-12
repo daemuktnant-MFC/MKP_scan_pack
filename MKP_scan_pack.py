@@ -28,35 +28,44 @@ if "temp_barcode" not in st.session_state:
     st.session_state.temp_barcode = ""
 if "staged_scans" not in st.session_state:
     st.session_state.staged_scans = []
-    
-# (แก้ไข State) ใช้ State เดียวเพื่อระบุว่าต้องเปิด Dialog ยืนยันอะไร
 if "show_dialog_for" not in st.session_state:
-    st.session_state.show_dialog_for = None # ค่าจะเป็น 'tracking', 'barcode', หรือ None
+    st.session_state.show_dialog_for = None 
 
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
 
-def add_to_stage():
+# **********************************************
+# ฟังก์ชัน add_to_stage() ถูกยกเลิกและย้ายไปรวมใน Dialog แล้ว
+# **********************************************
+
+def delete_item(item_id_to_delete):
+    """ฟังก์ชันสำหรับลบรายการออกจากตารางพักข้อมูล"""
+    st.session_state.staged_scans = [
+        item for item in st.session_state.staged_scans 
+        if item["id"] != item_id_to_delete
+    ]
+
+def add_and_clear_staging():
+    """
+    (ใหม่) ฟังก์ชันนี้จะถูกเรียกจากปุ่มใน Dialog Barcode 
+    เพื่อเพิ่มข้อมูลและเคลียร์ State ทันที
+    """
     if st.session_state.temp_tracking and st.session_state.temp_barcode:
         st.session_state.staged_scans.append({
             "id": str(uuid.uuid4()),
             "tracking": st.session_state.temp_tracking,
             "barcode": st.session_state.temp_barcode
         })
-        # (แก้ไข #2) ล้างค่าที่รอสแกน (รวมถึง State Dialog)
+        # เคลียร์ค่า staging และ Dialog state
         st.session_state.temp_tracking = ""
         st.session_state.temp_barcode = ""
-        st.session_state.show_dialog_for = None # <--- ล้าง State ของ Dialog
-        st.rerun() # ต้อง rerun เพื่อให้ตารางอัปเดต
-    else:
-        st.warning("กรุณาสแกนให้ครบทั้ง Tracking และ Barcode ก่อนเพิ่ม")
+        st.session_state.show_dialog_for = None 
+    
+    # ต้อง rerun เพื่ออัปเดตตารางและปิด Dialog
+    st.rerun() 
 
-def delete_item(item_id_to_delete):
-    st.session_state.staged_scans = [
-        item for item in st.session_state.staged_scans 
-        if item["id"] != item_id_to_delete
-    ]
 
 def save_all_to_db():
+    """ฟังก์ชันสำหรับบันทึกข้อมูลทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
         st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
         return
@@ -106,11 +115,13 @@ def show_confirmation_dialog(is_tracking):
             st.session_state.show_dialog_for = None
             st.rerun()
     else: # Barcode
-        st.success("Barcode ถูกสแกนเรียบร้อยแล้ว!")
+        # (แก้ไข #1) เปลี่ยนปุ่มเป็นการ "เพิ่มข้อมูลลงรายการทันที"
+        st.success("Barcode ถูกสแกนและยืนยันแล้ว!")
+        st.warning("ข้อมูลจะถูกเพิ่มลงในรายการทันที")
         
-        if st.button("ปิด (และพร้อมเพิ่มรายการ)"):
-            st.session_state.show_dialog_for = None
-            st.rerun()
+        if st.button("ปิด (และเพิ่มลงในรายการ)"):
+            add_and_clear_staging() # <--- เรียกฟังก์ชันเพิ่มข้อมูลทันที
+            # st.rerun() ถูกเรียกจากใน add_and_clear_staging() แล้ว
 
 
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
@@ -128,7 +139,6 @@ with tab1:
     else:
         
         # --- Logic การแสดง Dialog ---
-        # (แก้ไข #1) เรียก Dialog Function ตาม State ที่เปลี่ยนไป
         if st.session_state.show_dialog_for == 'tracking':
              show_confirmation_dialog(is_tracking=True)
         elif st.session_state.show_dialog_for == 'barcode':
@@ -137,14 +147,16 @@ with tab1:
         # --- ส่วนที่ 1: กล้องสแกน (ใช้จุดเดียว) ---
         st.subheader("1. สแกนที่นี่ (Scan Here)")
         
-        # เราจะแสดง Scanner ก็ต่อเมื่อ Dialog ปิดอยู่เท่านั้น
         if st.session_state.show_dialog_for is None:
             if not st.session_state.temp_tracking:
                 st.info("ขั้นตอนที่ 1: กรุณาสแกน Tracking...")
             elif not st.session_state.temp_barcode:
                  st.success("ขั้นตอนที่ 2: กรุณาสแกน Barcode...")
             else:
-                 st.warning("กรุณากด 'เพิ่มลงในรายการ' ก่อนสแกนกล่องถัดไป")
+                 st.success("สำเร็จ! กรุณาเริ่มสแกน Tracking กล่องถัดไปได้เลย")
+                 # (แก้ไข) แสดง Scanner อีกครั้งทันที
+                 st.session_state.temp_tracking = "" # ล้างค่า temp_tracking เพื่อเริ่มใหม่
+                 st.rerun() # เริ่ม Logic ใหม่เพื่อสแกน Tracking ถัดไปทันที
 
             scan_value = qrcode_scanner(key="main_scanner")
 
@@ -152,25 +164,27 @@ with tab1:
                 # Logic 1: สแกน Tracking
                 if not st.session_state.temp_tracking:
                     st.session_state.temp_tracking = scan_value
-                    st.session_state.show_dialog_for = 'tracking' # <--- สั่งให้เปิด Dialog Tracking
+                    st.session_state.show_dialog_for = 'tracking' 
                     st.rerun() 
                 
                 # Logic 2: สแกน Barcode
                 elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
                     if scan_value != st.session_state.temp_tracking:
                         st.session_state.temp_barcode = scan_value
-                        st.session_state.show_dialog_for = 'barcode' # <--- สั่งให้เปิด Dialog Barcode
-                        st.rerun() # <--- ต้อง rerun เพื่อให้ Dialog Barcode เปิด
+                        st.session_state.show_dialog_for = 'barcode' 
+                        st.rerun() 
                     
+                # Logic 3: สแกนซ้ำเมื่อสแกนเสร็จแล้วทั้งคู่ (ควรจะถูก Logic ด้านบนจัดการไปแล้ว)
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
-                    st.warning("กรุณากด 'เพิ่มลงในรายการ' ก่อนสแกนกล่องถัดไป")
+                    st.warning("กรุณารอสักครู่ (ระบบกำลังเพิ่มรายการ) หรือเริ่มสแกน Tracking ถัดไปได้เลย")
+
         
         else:
             st.info(f"... กรุณากด 'ปิด' ใน Popup ยืนยัน {st.session_state.show_dialog_for.capitalize()} ...")
 
-        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว (เหมือนเดิม) ---
-        st.subheader("2. ข้อมูลที่รอเพิ่ม")
-        col1, col2, col3 = st.columns([3, 3, 1])
+        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว (ลบปุ่มเพิ่มรายการ) ---
+        st.subheader("2. ข้อมูลที่กำลังสแกน (เพิ่มอัตโนมัติเมื่อยืนยัน Barcode)")
+        col1, col2 = st.columns([1, 1])
         
         with col1:
             st.text_input("Tracking ที่สแกนได้", 
@@ -180,13 +194,7 @@ with tab1:
             st.text_input("Barcode ที่สแกนได้", 
                           value=st.session_state.temp_barcode, 
                           disabled=True)
-        with col3:
-            st.button("➕ เพิ่มลงในรายการ", 
-                      type="secondary",
-                      use_container_width=True,
-                      on_click=add_to_stage,
-                      disabled=(not st.session_state.temp_tracking or not st.session_state.temp_barcode)
-                     )
+        # ❌❌❌ ลบบล็อกปุ่ม "➕ เพิ่มลงในรายการ" ออกไปแล้ว ❌❌❌
 
         st.divider()
 
