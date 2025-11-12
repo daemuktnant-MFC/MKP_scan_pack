@@ -63,7 +63,6 @@ def add_and_clear_staging():
     # ต้อง rerun เพื่ออัปเดตตารางและปิด Dialog
     st.rerun() 
 
-
 def save_all_to_db():
     """ฟังก์ชันสำหรับบันทึกข้อมูลทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
@@ -71,6 +70,8 @@ def save_all_to_db():
         return
     try:
         data_to_insert = []
+        
+        # 🟢 FIX 1: ดึงเวลาปัจจุบันใน Timezone ไทย (GMT+7)
         THAI_TZ = pytz.timezone("Asia/Bangkok")
         current_time = datetime.now(THAI_TZ)
         
@@ -79,10 +80,13 @@ def save_all_to_db():
                 "user_id": st.session_state.current_user,
                 "tracking_code": item["tracking"],
                 "product_barcode": item["barcode"],
-                "created_at": current_time
+                # 🟢 FIX 2: ตัด Timezone ออกก่อนส่งให้ DB 
+                # (PostgreSQL จะบันทึกตาม Timezone ที่กำหนด แต่เราไม่ส่งข้อมูล Timezone ไป)
+                "created_at": current_time.replace(tzinfo=None) 
             })
         
         df_to_insert = pd.DataFrame(data_to_insert)
+        
         df_to_insert.to_sql(
             "scans", 
             con=supabase_conn.engine, 
