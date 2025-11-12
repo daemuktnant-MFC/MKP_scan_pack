@@ -99,10 +99,12 @@ with tab1:
             # เปิดกล้องด้วย webrtc_streamer
             webrtc_streamer(
                 key="tracking_scanner",
-                mode=WebRtcMode.SENDONLY, # ส่งภาพจากกล้องผู้ใช้อย่างเดียว
-                video_transformer_factory=TrackingScanner, # ใช้ Class ที่เราสร้าง
+                mode=WebRtcMode.SENDONLY,
+                video_processor_factory=TrackingScanner, # <--- แก้เป็น _processor_
                 media_stream_constraints={"video": True, "audio": False},
                 async_processing=True,
+                # เพิ่มบรรทัดนี้เข้าไปครับ
+                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
             )
             
             # แสดงผลค่าที่สแกนได้จาก session_state
@@ -116,9 +118,11 @@ with tab1:
             webrtc_streamer(
                 key="product_scanner",
                 mode=WebRtcMode.SENDONLY,
-                video_transformer_factory=ProductScanner, # ใช้ Class แยกกัน
+                video_processor_factory=ProductScanner, # <--- แก้เป็น _processor_
                 media_stream_constraints={"video": True, "audio": False},
                 async_processing=True,
+                # เพิ่มบรรทัดนี้เข้าไปครับ
+                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
             )
             
             if st.session_state.product_barcode:
