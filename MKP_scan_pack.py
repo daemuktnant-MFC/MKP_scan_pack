@@ -105,6 +105,7 @@ with tab1:
                 st.write("---")
                 st.warning("ขั้นต่อไป: กรุณากด 'ปิด' แล้วสแกน Barcode ครับ")
                 
+                # ปุ่ม 'ปิด' (มี st.rerun() ที่จำเป็น)
                 if st.button("ปิด (และเตรียมสแกน Barcode)"):
                     st.session_state.show_modal = False
                     st.rerun()
@@ -124,15 +125,14 @@ with tab1:
                 # Logic 1: สแกน Tracking
                 if not st.session_state.temp_tracking:
                     st.session_state.temp_tracking = scan_value
-                    st.session_state.show_modal = True
-                    st.rerun() # <-- (แก้ไขจากครั้งที่แล้ว) st.rerun() ตรงนี้จำเป็น เพื่อเปิด Modal
+                    st.session_state.show_modal = True # <--- สั่งให้เปิด Popup
+                    # ❌❌❌ ลบ st.rerun() ออกจากตรงนี้แล้ว ❌❌❌
                 
                 # Logic 2: สแกน Barcode
                 elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
                     if scan_value != st.session_state.temp_tracking:
                         st.session_state.temp_barcode = scan_value
-                        # ❌❌❌ ลบ st.rerun() ออกจากตรงนี้แล้ว ❌❌❌
-                        # (แอปจะอัปเดตช่อง text_input ด้านล่างให้เอง)
+                        st.rerun() # <--- st.rerun() ตรงนี้ "ถูกต้อง" (เพื่ออัปเดตหน้าจอ)
                     
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
                     st.warning("กรุณากด 'เพิ่มลงในรายการ' ก่อนสแกนกล่องถัดไป")
@@ -220,7 +220,7 @@ with tab2:
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
                 return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            csv_data = convert_df_to_csv(df_to_convert)
+            csv_data = convert_df_to_csv(data_df)
             st.download_button(
                 label="📥 Download ข้อมูลเป็น CSV",
                 data=csv_data,
