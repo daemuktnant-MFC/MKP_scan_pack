@@ -9,7 +9,7 @@ import av  # <-- Library ใหม่สำหรับ Video Frame
 from streamlit_webrtc import (
     webrtc_streamer, 
     WebRtcMode, 
-    VideoFrameProcessor  # <-- แก้เป็นตัวนี้ครับ
+    VideoProcessorBase  # <-- แก้เป็นตัวนี้ครับ
 )
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
@@ -36,7 +36,7 @@ if "current_user" not in st.session_state:
 
 # --- 3. สร้าง Class สำหรับถอดรหัส (เวอร์ชันใหม่ ใช้ recv()) ---
 # เราจะใช้ Class เดียว แต่ส่ง "key" ที่ต่างกันไป
-class BarcodeProcessor(VideoFrameProcessor):
+class BarcodeProcessor(VideoProcessorBase    ):
     def __init__(self, session_state_key):
         self.session_state_key = session_state_key
         self.found_code = ""
