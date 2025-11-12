@@ -5,3 +5,4 @@ streamlit-webrtc
 pyzbar
 opencv-python-headless
 numpy
+av
