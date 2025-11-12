@@ -1,4 +1,7 @@
 streamlit
 supabase
-streamlit-camera-barcode-reader
 pandas
+streamlit-webrtc
+pyzbar
+opencv-python-headless
+numpy
