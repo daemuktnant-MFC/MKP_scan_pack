@@ -5,6 +5,7 @@ from datetime import datetime
 from streamlit.connections import SQLConnection
 from streamlit_qrcode_scanner import qrcode_scanner
 import uuid 
+import pytz # <-- เพิ่ม Library สำหรับ Timezone
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
 st.set_page_config(page_title="Box Scanner", layout="wide")
@@ -27,11 +28,10 @@ if "temp_barcode" not in st.session_state:
     st.session_state.temp_barcode = ""
 if "staged_scans" not in st.session_state:
     st.session_state.staged_scans = []
-if "show_modal" not in st.session_state:
-    st.session_state.show_modal = False
+if "show_dialog" not in st.session_state:
+    st.session_state.show_dialog = False # <--- เปลี่ยนชื่อ State จาก modal เป็น dialog
 
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
-# (ฟังก์ชัน add_to_stage, delete_item, save_all_to_db เหมือนเดิม)
 
 def add_to_stage():
     if st.session_state.temp_tracking and st.session_state.temp_barcode:
@@ -57,7 +57,7 @@ def save_all_to_db():
         return
     try:
         data_to_insert = []
-        import pytz
+        # --- (แก้ไข #2) Timezone ---
         THAI_TZ = pytz.timezone("Asia/Bangkok")
         current_time = datetime.now(THAI_TZ)
         
@@ -66,7 +66,8 @@ def save_all_to_db():
                 "user_id": st.session_state.current_user,
                 "tracking_code": item["tracking"],
                 "product_barcode": item["barcode"],
-                "created_at": current_time.replace(tzinfo=None)
+                # บันทึกเป็นเวลาท้องถิ่น (Supabase จะรับค่านี้)
+                "created_at": current_time
             })
         
         df_to_insert = pd.DataFrame(data_to_insert)
@@ -88,6 +89,19 @@ def save_all_to_db():
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
+# --- (ใหม่) สร้าง Dialog Function (นอก with tab1) ---
+# เราใช้ st.dialog ที่เป็น function decorator (ต้องอยู่ข้างนอก)
+@st.dialog("✅ สแกน Tracking สำเร็จ")
+def show_tracking_dialog():
+    st.info("กรุณายืนยัน Tracking Number ที่สแกนได้:")
+    st.code(st.session_state.temp_tracking)
+    st.warning("ขั้นต่อไป: กรุณากด 'ปิด' แล้วสแกน Barcode ครับ")
+    
+    # ปุ่ม 'ปิด'
+    if st.button("ปิด (และเตรียมสแกน Barcode)"):
+        st.session_state.show_dialog = False
+        st.rerun()
+
 # --- TAB 1: หน้าสแกน ---
 with tab1:
     st.header("บันทึกการสแกน")
@@ -99,23 +113,16 @@ with tab1:
         st.warning("กรุณาป้อนชื่อผู้ใช้งานก่อนเริ่มสแกน")
     else:
         
-        # --- (ใหม่) Logic การแสดง Popup (Modal) ---
-        if st.session_state.show_modal:
-            @st.dialog("✅ สแกน Tracking สำเร็จ")
-            def show_tracking_modal():
-                st.info("กรุณายืนยัน Tracking Number ที่สแกนได้:")
-                st.code(st.session_state.temp_tracking)
-                st.warning("ขั้นต่อไป: กรุณากด 'ปิด' แล้วสแกน Barcode ครับ")
-                if st.button("ปิด (และเตรียมสแกน Barcode)"):
-                    st.session_state.show_modal = False
-                    st.rerun()
-            show_tracking_modal()
-
-
+        # --- Logic การแสดง Dialog ---
+        # (แก้ไข #1) ถ้า State เป็น True ให้เรียก Dialog Function
+        if st.session_state.show_dialog:
+             show_tracking_dialog()
+             
         # --- ส่วนที่ 1: กล้องสแกน (ใช้จุดเดียว) ---
         st.subheader("1. สแกนที่นี่ (Scan Here)")
         
-        if not st.session_state.show_modal:
+        # เราจะแสดง Scanner ก็ต่อเมื่อ Dialog ปิดอยู่เท่านั้น
+        if not st.session_state.show_dialog:
             if not st.session_state.temp_tracking:
                 st.info("ขั้นตอนที่ 1: กรุณาสแกน Tracking...")
             else:
@@ -127,15 +134,14 @@ with tab1:
                 # Logic 1: สแกน Tracking
                 if not st.session_state.temp_tracking:
                     st.session_state.temp_tracking = scan_value
-                    st.session_state.show_modal = True
-                    st.rerun() # <-- (แก้ไขจากครั้งที่แล้ว) st.rerun() ตรงนี้จำเป็น เพื่อเปิด Modal
+                    st.session_state.show_dialog = True # <--- สั่งให้เปิด Dialog
+                    # st.rerun() อยู่ใน Logic 1 (Tracking) เพื่อให้ Dialog เปิดทันที
+                    st.rerun() 
                 
                 # Logic 2: สแกน Barcode
                 elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
                     if scan_value != st.session_state.temp_tracking:
                         st.session_state.temp_barcode = scan_value
-                        # ❌❌❌ ลบ st.rerun() ออกจากตรงนี้แล้ว ❌❌❌
-                        # (แอปจะอัปเดตช่อง text_input ด้านล่างให้เอง)
                     
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
                     st.warning("กรุณากด 'เพิ่มลงในรายการ' ก่อนสแกนกล่องถัดไป")
@@ -160,6 +166,7 @@ with tab1:
                       type="secondary",
                       use_container_width=True,
                       on_click=add_to_stage,
+                      # ป้องกันไม่ให้กดเพิ่มถ้ารายการไม่ครบ
                       disabled=(not st.session_state.temp_tracking or not st.session_state.temp_barcode)
                      )
 
@@ -169,7 +176,6 @@ with tab1:
         st.subheader(f"3. รายการที่รอ C ({len(st.session_state.staged_scans)} รายการ)")
         st.metric("จำนวนกล่องที่สแกน (ในรอบนี้)", st.session_state.scan_count)
         
-        # (Code ส่วนนี้เหมือนเดิมทั้งหมด)
         h_col1, h_col2, h_col3 = st.columns([3, 3, 1])
         h_col1.markdown("**Tracking**")
         h_col2.markdown("**Barcode**")
@@ -194,10 +200,10 @@ with tab1:
                   disabled=(not st.session_state.staged_scans)
                  )
 
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เหมือนเดิมทุกประการ) ---
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Timezone ใน Filter) ---
 with tab2:
     st.header("ค้นหาและดาวน์โหลดข้อมูล")
-    # (Code ทั้งหมดใน Tab 2 เหมือนเดิมครับ)
+    
     with st.expander("ตัวกรองข้อมูล (Filter)", expanded=True):
         col_f1, col_col2 = st.columns(2)
         with col_f1:
@@ -212,18 +218,25 @@ with tab2:
             filters.append("user_id = :user")
             params["user"] = filter_user
         if filter_date:
-            filters.append("DATE(created_at) = :date")
+            # (แก้ไข #2) กรองตามวันที่ที่ถูกบันทึกใน Timezone ไทย (DATE(created_at) ทำงานบน Supabase)
+            filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') = :date")
             params["date"] = filter_date
+            
         if filters:
             query += " WHERE " + " AND ".join(filters)
+        
         query += " ORDER BY created_at DESC"
         data_df = supabase_conn.query(query, params=params)
+        
         if not data_df.empty:
             st.dataframe(data_df, use_container_width=True)
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
                 return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            csv_data = convert_df_to_csv(df_to_convert)
+            
+            # (แก้ไข) ต้องใช้ data_df ที่ดึงมา
+            csv_data = convert_df_to_csv(data_df) 
+            
             st.download_button(
                 label="📥 Download ข้อมูลเป็น CSV",
                 data=csv_data,
