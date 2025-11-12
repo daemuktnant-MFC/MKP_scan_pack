@@ -66,7 +66,7 @@ def save_all_to_db():
                 "user_id": st.session_state.current_user,
                 "tracking_code": item["tracking"],
                 "product_barcode": item["barcode"],
-                "created_at": current_time
+                "created_at": current_time.replace(tzinfo=None)
             })
         
         df_to_insert = pd.DataFrame(data_to_insert)
