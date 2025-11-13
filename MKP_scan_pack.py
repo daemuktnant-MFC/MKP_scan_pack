@@ -162,7 +162,7 @@ with tab1:
     with col_metric:
         #st.metric("Tracking ที่สแกน (รอบนี้)", len(st.session_state.staged_scans))
 
-    st.divider()
+    #st.divider()
 
     # --- ส่วนที่ 2: Logic การสแกน (State Machine 3 ขั้นตอน) ---
     scan_value = None 
