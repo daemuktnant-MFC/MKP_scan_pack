@@ -181,15 +181,26 @@ with tab1:
             scan_value = qrcode_scanner(key="main_scanner")
 
             if scan_value:
+                # Logic 1: สแกน Tracking
                 if not st.session_state.temp_tracking:
                     st.session_state.temp_tracking = scan_value
                     st.session_state.show_dialog_for = 'tracking' 
                     st.rerun() 
+                
+                # Logic 2: สแกน Barcode
                 elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
                     if scan_value != st.session_state.temp_tracking:
+                        # (ถูกต้อง) นี่คือ Barcode
                         st.session_state.temp_barcode = scan_value
                         st.session_state.show_dialog_for = 'barcode' 
                         st.rerun() 
+                    
+                    # --- 🟢 นี่คือการแก้ไขที่ต้องการ 🟢 ---
+                    else:
+                        # (สแกนซ้ำ) นี่คือ Tracking เดิม
+                        st.toast("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
+                    # --- 🟢 สิ้นสุดการแก้ไข 🟢 ---
+                        
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
                     st.warning("รอสักครู่ (ระบบกำลังเพิ่มรายการ) หรือเริ่มสแกน Tracking ถัดไปได้เลย")
         else:
@@ -209,7 +220,7 @@ with tab1:
         
         st.divider()
 
-        # --- 🟢 (ย้ายมา) ปุ่มบันทึกข้อมูล 🟢 ---
+        # --- (ย้ายมา) ปุ่มบันทึกข้อมูล ---
         st.button("💾 บันทึกทั้งหมด",
                   type="primary",
                   use_container_width=True,
