@@ -144,23 +144,23 @@ def save_all_to_db():
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน ---
+# --- TAB 1: หน้าสแกน (ลบ Metric ออก) ---
 with tab1:
-    #st.header("บันทึกการสแกน")
+    st.header("บันทึกการสแกน") 
 
     # --- ส่วนที่ 1: แสดงผล (Display Area) ---
-    col_user_display, col_metric = st.columns([3, 2])
+    # 🟢 (แก้ไข) ลบ st.columns และ col_metric ออก
     
-    with col_user_display:
-        st.subheader("User")
-        if st.session_state.current_user:
-            st.code(st.session_state.current_user)
-            st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart)
-        else:
-            st.info("...รอล็อค User...")
+    st.subheader("1. ผู้ใช้งาน (User)")
+    if st.session_state.current_user:
+        st.code(st.session_state.current_user)
+        st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart)
+    else:
+        st.info("...รอล็อค User...")
     
-    with col_metric:
-        st.metric("Tracking ที่สแกน (รอบนี้)", len(st.session_state.staged_scans))
+    # ❌ (แก้ไข) ลบส่วน st.metric ออกเรียบร้อย
+    # with col_metric:
+    #     st.metric("Tracking ที่สแกน (รอบนี้)", len(st.session_state.staged_scans))
 
     st.divider()
 
@@ -197,9 +197,8 @@ with tab1:
 
     # --- 2C: State 3: มี User และ Barcode (พร้อมสแกน Tracking) ---
     else:
-        st.subheader("Barcode")
+        st.subheader("2. Barcode ที่ล็อคอยู่")
         st.code(st.session_state.temp_barcode)
-        # ❌ (ลบ) ปุ่ม "เปลี่ยน Barcode" ที่ไม่ใช้งานออก
         st.divider()
         
         st.subheader("ขั้นตอนที่ 3: สแกน Tracking Number")
