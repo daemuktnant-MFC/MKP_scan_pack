@@ -59,7 +59,7 @@ def init_supabase_connection():
 
 supabase_conn = init_supabase_connection()
 
-# --- 2. สร้าง Session State (เหมือนเดิม) ---
+# --- 2. สร้าง Session State ---
 if "current_user" not in st.session_state:
     st.session_state.current_user = ""
 if "scan_count" not in st.session_state:
@@ -72,6 +72,11 @@ if "staged_scans" not in st.session_state:
     st.session_state.staged_scans = []
 if "show_dialog_for" not in st.session_state:
     st.session_state.show_dialog_for = None 
+
+# --- 🟢 (ใหม่) เพิ่ม State สำหรับ Toast 🟢 ---
+if "show_scan_error" not in st.session_state:
+    st.session_state.show_scan_error = False
+# --- 🟢 สิ้นสุด 🟢 ---
 
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) (เหมือนเดิม) ---
 def delete_item(item_id_to_delete):
@@ -151,6 +156,12 @@ tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อ�
 with tab1:
     st.header("บันทึกการสแกน")
 
+    # --- 🟢 (ใหม่) Logic แสดง Toast แจ้งเตือน 🟢 ---
+    if st.session_state.get("show_scan_error", False):
+        st.toast("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
+        st.session_state.show_scan_error = False # เคลียร์ธง
+    # --- 🟢 สิ้นสุด 🟢 ---
+
     col_user, col_metric = st.columns([3, 2]) 
     with col_user:
         st.text_input("ชื่อผู้ใช้งาน (User):", key="current_user") 
@@ -198,7 +209,8 @@ with tab1:
                     # --- 🟢 นี่คือการแก้ไขที่ต้องการ 🟢 ---
                     else:
                         # (สแกนซ้ำ) นี่คือ Tracking เดิม
-                        st.toast("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
+                        st.session_state.show_scan_error = True # 1. ตั้งธง
+                        st.rerun() # 2. บังคับ rerun
                     # --- 🟢 สิ้นสุดการแก้ไข 🟢 ---
                         
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
@@ -268,30 +280,4 @@ with tab2:
             filters.append("user_id = :user")
             params["user"] = filter_user
         if filter_date:
-            filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') = :date")
-            params["date"] = filter_date
-            
-        if filters:
-            query += " WHERE " + " AND ".join(filters)
-        
-        query += " ORDER BY created_at DESC"
-        data_df = supabase_conn.query(query, params=params)
-        
-        if not data_df.empty:
-            st.dataframe(data_df, use_container_width=True)
-            @st.cache_data
-            def convert_df_to_csv(df_to_convert):
-                return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            
-            csv_data = convert_df_to_csv(data_df)
-            
-            st.download_button(
-                label="📥 Download ข้อมูลเป็น CSV",
-                data=csv_data,
-                file_name=f"scan_export_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+            filters.append
