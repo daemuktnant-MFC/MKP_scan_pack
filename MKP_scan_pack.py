@@ -144,73 +144,37 @@ def save_all_to_db():
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (ลบ Metric ออก) ---
+# --- TAB 1: หน้าสแกน (ย้ายกล้องขึ้นบนสุด) ---
 with tab1:
     #st.header("บันทึกการสแกน") 
 
-    # --- ส่วนที่ 1: แสดงผล (Display Area) ---
-    # 🟢 (แก้ไข) ลบ st.columns และ col_metric ออก
+    # --- ส่วนที่ 1: กล้องสแกน และ ข้อความแนะนำ (Dynamic) ---
     
-    st.subheader("1. ผู้ใช้งาน (User)")
-    if st.session_state.current_user:
-        st.code(st.session_state.current_user)
-        st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart)
-    else:
-        st.info("...รอล็อค User...")
+    # สร้าง st.empty() เพื่อจองพื้นที่สำหรับข้อความแนะนำ
+    # เราจะอัปเดตข้อความนี้ตามสถานะของแอป
+    scanner_prompt_placeholder = st.empty() 
     
-    # ❌ (แก้ไข) ลบส่วน st.metric ออกเรียบร้อย
-    # with col_metric:
-    #     st.metric("Tracking ที่สแกน (รอบนี้)", len(st.session_state.staged_scans))
+    # เรียกกล้องสแกน (จะอยู่ที่นี่ที่เดียว)
+    scan_value = qrcode_scanner(key="main_scanner")
 
-    st.divider()
-
-    # --- ส่วนที่ 2: Logic การสแกน (State Machine 3 ขั้นตอน) ---
-    scan_value = None 
-
-    # --- 2A: State 1: ยังไม่มี User (บังคับสแกน User ก่อน) ---
-    if not st.session_state.current_user:
-        st.subheader("ขั้นตอนที่ 1: สแกน 'ชื่อผู้ใช้งาน'")
-        st.info("กรุณาสแกน QR Code/Barcode ของ 'ชื่อผู้ใช้งาน'...")
-        
-        if st.session_state.show_duplicate_tracking_error:
-            st.session_state.show_duplicate_tracking_error = False
-
-        scan_value = qrcode_scanner(key="scanner_user") 
-        
-        if scan_value:
+    # --- ส่วนที่ 2: Logic ประมวลผลการสแกน ---
+    # (ย้าย Logic การประมวลผลมาไว้ตรงนี้)
+    if scan_value:
+        # --- 2A: State 1: ยังไม่มี User (กำลังรอสแกน User) ---
+        if not st.session_state.current_user:
             st.session_state.current_user = scan_value
             st.success(f"User: {scan_value} ถูกล็อคแล้ว")
 
-    # --- 2B: State 2: มี User, ไม่มี Barcode (บังคับสแกน Barcode) ---
-    elif not st.session_state.temp_barcode:
-        st.subheader("ขั้นตอนที่ 2: สแกน Barcode สินค้า")
-        st.info("สแกน Barcode สินค้าที่จะใช้...")
-        
-        scan_value = qrcode_scanner(key="scanner_barcode")
-        
-        if scan_value:
+        # --- 2B: State 2: มี User, ไม่มี Barcode (กำลังรอสแกน Barcode) ---
+        elif not st.session_state.temp_barcode:
             if scan_value == st.session_state.current_user:
                 st.warning("⚠️ นั่นคือ User! กรุณาสแกน Barcode สินค้า", icon="⚠️")
             else:
                 st.session_state.temp_barcode = scan_value
                 st.success(f"Barcode: {scan_value} ถูกล็อคแล้ว")
 
-    # --- 2C: State 3: มี User และ Barcode (พร้อมสแกน Tracking) ---
-    else:
-        st.subheader("2. Barcode ที่ล็อคอยู่")
-        st.code(st.session_state.temp_barcode)
-        st.divider()
-        
-        st.subheader("ขั้นตอนที่ 3: สแกน Tracking Number")
-
-        if st.session_state.show_duplicate_tracking_error:
-            st.error(f"⚠️ สแกนซ้ำ! Tracking '{st.session_state.last_scanned_tracking}' มีอยู่ในรายการแล้ว", icon="⚠️")
+        # --- 2C: State 3: มี User และ Barcode (กำลังรอสแกน Tracking) ---
         else:
-            st.info("สแกน Tracking Number ทีละกล่อง...")
-
-        scan_value = qrcode_scanner(key="scanner_tracking")
-
-        if scan_value:
             if scan_value == st.session_state.temp_barcode:
                 st.warning("⚠️ นั่นคือ Barcode เดิม! กรุณาสแกน Tracking Number", icon="⚠️")
                 st.session_state.show_duplicate_tracking_error = False
@@ -229,41 +193,74 @@ with tab1:
                 st.session_state.show_duplicate_tracking_error = False
                 st.success(f"เพิ่ม Tracking: {scan_value} สำเร็จ!")
 
-    st.divider()
-
-    # --- ส่วนที่ 3: ปุ่มบันทึก และ รายการที่กำลังสแกน ---
-    st.button("💾 บันทึกทั้งหมด (และเริ่มใหม่)",
-              type="primary",
-              use_container_width=True,
-              on_click=save_all_to_db,
-              disabled=(not st.session_state.staged_scans or not st.session_state.temp_barcode or not st.session_state.current_user)
-             )
-
-    st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
+    # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ (Dynamic) ---
+    # (ต้องอยู่หลัง Logic การประมวลผล เพื่อให้ข้อความอัปเดตทันที)
     
-    if not st.session_state.staged_scans:
-        if st.session_state.temp_barcode:
-            st.info(f"ยังไม่มีรายการสแกน... (Barcode ที่ใช้คือ: {st.session_state.temp_barcode})")
-        elif st.session_state.current_user:
-            st.info(f"ยังไม่มีรายการสแกน... (User คือ: {st.session_state.current_user})")
-        else:
-             st.info("ยังไม่มีรายการสแกน...")
+    if not st.session_state.current_user:
+        scanner_prompt_placeholder.info("ขั้นตอนที่ 1: สแกน 'ชื่อผู้ใช้งาน'...")
+    elif not st.session_state.temp_barcode:
+        scanner_prompt_placeholder.info("ขั้นตอนที่ 2: สแกน Barcode สินค้า...")
     else:
-        for item in reversed(st.session_state.staged_scans): 
-            with st.container(border=True):
-                st.caption(f"Barcode: {item['barcode']}")
-                st.caption("Tracking:")
-                
-                col_code, col_del = st.columns([4, 1]) 
-                with col_code:
-                    st.code(item["tracking"]) 
-                with col_del:
-                    st.button("❌ ลบ", 
-                              key=f"del_{item['id']}", 
-                              on_click=delete_item, 
-                              args=(item['id'],),
-                              use_container_width=True
-                             )
+        # State 3: กำลังสแกน Tracking
+        if st.session_state.show_duplicate_tracking_error:
+            scanner_prompt_placeholder.error(f"⚠️ สแกนซ้ำ! '{st.session_state.last_scanned_tracking}' มีในรายการแล้ว กรุณาสแกน Tracking ถัดไป...", icon="⚠️")
+        else:
+            scanner_prompt_placeholder.info("ขั้นตอนที่ 3: สแกน Tracking Number ทีละกล่อง...")
+
+
+    # --- ส่วนที่ 4: แสดงผล (Display Area) ---
+    st.divider()
+    st.subheader("1. ผู้ใช้งาน (User)")
+    if st.session_state.current_user:
+        st.code(st.session_state.current_user)
+        st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart)
+    else:
+        st.info("...รอล็อค User...")
+    
+    # (แสดงข้อมูล Barcode และอื่นๆ ต่อเมื่อมี User แล้ว)
+    if st.session_state.current_user:
+        st.divider()
+        st.subheader("2. Barcode ที่ล็อคอยู่")
+        if st.session_state.temp_barcode:
+            st.code(st.session_state.temp_barcode)
+        else:
+            st.info("...รอล็อค Barcode...")
+        
+        st.divider()
+
+        # --- ส่วนที่ 5: ปุ่มบันทึก และ รายการที่กำลังสแกน ---
+        st.button("💾 บันทึกทั้งหมด (และเริ่มใหม่)",
+                  type="primary",
+                  use_container_width=True,
+                  on_click=save_all_to_db,
+                  disabled=(not st.session_state.staged_scans or not st.session_state.temp_barcode or not st.session_state.current_user)
+                 )
+
+        st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
+        
+        if not st.session_state.staged_scans:
+            if st.session_state.temp_barcode:
+                st.info(f"ยังไม่มีรายการสแกน... (Barcode ที่ใช้คือ: {st.session_state.temp_barcode})")
+            elif st.session_state.current_user:
+                st.info(f"ยังไม่มีรายการสแกน... (User คือ: {st.session_state.current_user})")
+            else:
+                 st.info("ยังไม่มีรายการสแกน...")
+        else:
+            for item in reversed(st.session_state.staged_scans): 
+                with st.container(border=True):
+                    st.caption(f"Barcode: {item['barcode']}")
+                    st.caption("Tracking:")
+                    
+                    col_code, col_del = st.columns([4, 1]) 
+                    with col_code:
+                        st.code(item["tracking"]) 
+                    with col_del:
+                        st.button("❌ ลบ", 
+                                  key=f"del_{item['id']}", 
+                                  on_click=delete_item, 
+                                  args=(item['id'],),
+                                  use_container_width=True
+                                 )
 
 # --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เหมือนเดิม) ---
 with tab2:
