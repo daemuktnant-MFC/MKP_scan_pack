@@ -130,11 +130,18 @@ def save_all_to_db():
         st.session_state.scan_count += saved_count # เพิ่มยอดสะสม
 
         # --- 🟢 (แก้ไข) เคลียร์ค่าทั้งหมด ---
+        #st.session_state.staged_scans = []
+        #st.session_state.temp_barcode = "" 
+        #st.session_state.show_duplicate_tracking_error = False
+        #st.session_state.last_scanned_tracking = ""
+        #st.session_state.current_user = "" # <-- 🟢 (แก้ไข) เพิ่มบรรทัดนี้เพื่อล้างค่า User
+        def clear_all_and_restart():
+        """(ใหม่) ล้างทุกอย่างและเริ่มใหม่ทั้งหมด (User, Barcode, Staging)"""
+        st.session_state.current_user = ""
+        st.session_state.temp_barcode = ""
         st.session_state.staged_scans = []
-        st.session_state.temp_barcode = "" 
         st.session_state.show_duplicate_tracking_error = False
         st.session_state.last_scanned_tracking = ""
-        st.session_state.current_user = "" # <-- 🟢 (แก้ไข) เพิ่มบรรทัดนี้เพื่อล้างค่า User
         # --- 🟢 สิ้นสุด 🟢 ---
         
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
