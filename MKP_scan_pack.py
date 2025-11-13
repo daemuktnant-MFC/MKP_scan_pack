@@ -73,9 +73,9 @@ if "staged_scans" not in st.session_state:
 if "show_dialog_for" not in st.session_state:
     st.session_state.show_dialog_for = None 
 
-# --- 🟢 (ใหม่) เพิ่ม State สำหรับ Toast 🟢 ---
-if "show_scan_error" not in st.session_state:
-    st.session_state.show_scan_error = False
+# --- 🟢 (แก้ไข) เพิ่ม State สำหรับ "กล่อง Error" 🟢 ---
+if "show_scan_error_message" not in st.session_state:
+    st.session_state.show_scan_error_message = False
 # --- 🟢 สิ้นสุด 🟢 ---
 
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) (เหมือนเดิม) ---
@@ -156,10 +156,10 @@ tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อ�
 with tab1:
     st.header("บันทึกการสแกน")
 
-    # --- 🟢 (ใหม่) Logic แสดง Toast แจ้งเตือน 🟢 ---
-    if st.session_state.get("show_scan_error", False):
-        st.toast("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
-        st.session_state.show_scan_error = False # เคลียร์ธง
+    # --- 🟢 (แก้ไข) Logic แสดง "กล่อง Error" 🟢 ---
+    if st.session_state.get("show_scan_error_message", False):
+        st.error("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
+        st.session_state.show_scan_error_message = False # เคลียร์ธง
     # --- 🟢 สิ้นสุด 🟢 ---
 
     col_user, col_metric = st.columns([3, 2]) 
@@ -209,7 +209,7 @@ with tab1:
                     # --- 🟢 นี่คือการแก้ไขที่ต้องการ 🟢 ---
                     else:
                         # (สแกนซ้ำ) นี่คือ Tracking เดิม
-                        st.session_state.show_scan_error = True # 1. ตั้งธง
+                        st.session_state.show_scan_error_message = True # 1. ตั้งธง
                         st.rerun() # 2. บังคับ rerun
                     # --- 🟢 สิ้นสุดการแก้ไข 🟢 ---
                         
@@ -306,4 +306,4 @@ with tab2:
         else:
             st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+        st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
