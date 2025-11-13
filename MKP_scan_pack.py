@@ -236,7 +236,7 @@ with tab1:
         st.subheader(f"3. รายการที่รอ C ({len(st.session_state.staged_scans)} รายการ)")
         
         # ❌ (ลบ) ลบ Header ของตารางเก่าทิ้ง
-        # h_col1, h_col2, h_col3 = st.columns([3, 3, 1]) ...
+        # h_col1, h_col2, h_col3 = st.columns([1.5, 1.5, 0.5]) ...
 
         if not st.session_state.staged_scans:
             st.info("ยังไม่มีรายการสแกน กรุณาสแกน Tracking และ Barcode")
@@ -250,7 +250,7 @@ with tab1:
                     
                     # แถวที่ 2: Barcode + ปุ่มลบ
                     st.caption("Barcode:")
-                    col_b, col_del = st.columns([4, 1]) # อัตราส่วน 4:1
+                    col_b, col_del = st.columns([2, 1]) # อัตราส่วน 2:1
                     
                     with col_b:
                         st.code(item["barcode"])
