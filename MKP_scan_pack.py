@@ -7,26 +7,50 @@ from streamlit_qrcode_scanner import qrcode_scanner
 import uuid 
 import pytz 
 
-# --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
+# --- (CSS สำหรับ Mobile Layout) ---
+# (ปรับ CSS ให้รองรับ Layout แบบ Card ใหม่)
 st.markdown("""
 <style>
+/* 1. Base Layout (เหมือนเดิม) */
 div.block-container {
     padding-top: 1rem; padding-bottom: 1rem;
     padding-left: 1rem; padding-right: 1rem;
 }
+/* 2. Headers (เหมือนเดิม) */
 h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
 h3 { font-size: 1.15rem !important; margin-top: 1rem; margin-bottom: 0.5rem; }
+/* 3. Metric (เหมือนเดิม) */
 [data-testid="stMetric"] {
     padding-top: 0 !important; background-color: #FAFAFA;
     border-radius: 0.5rem; padding: 0.5rem 1rem !important;
 }
 [data-testid="stMetricValue"] { font-size: 1.8rem !important; }
 [data-testid="stMetricLabel"] { font-size: 0.9rem !important; }
-div[data-testid="stHorizontalBlock"] > div:nth-child(3) .stButton button {
-    font-size: 0.8rem !important; padding: 0.2em 0.4em !important;
-    height: auto !important;
+
+/* --- 🟢 (ปรับ) CSS สำหรับ "ส่วนที่ 3" Layout ใหม่ --- */
+
+/* 4. Staging Card Container (กรอบของแต่ละรายการ) */
+[data-testid="stVerticalBlock"] > [data-testid="stContainer"] {
+    border: 1px solid #BBBBBB !important; /* เพิ่มกรอบให้ชัดเจน */
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem !important; /* ลด padding ในกรอบ */
+    margin-bottom: 0.5rem; /* ระยะห่างระหว่างการ์ด */
 }
-.stCode { font-size: 0.75rem !important; padding: 0.4em !important; }
+
+/* 5. Code Box (Tracking/Barcode) ในการ์ด */
+.stCode { 
+    font-size: 0.75rem !important; 
+    padding: 0.4em !important; 
+}
+
+/* 6. ปุ่ม "ลบ" (❌) ในการ์ด */
+/* (เจาะจงปุ่มที่อยู่ในคอลัมน์ที่ 2 ของ stHorizontalBlock) */
+div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
+    font-size: 0.8rem !important; 
+    padding: 0.4em 0.5em !important; /* ปรับขนาดปุ่มให้กระชับ */
+    height: 2.8em !important; /* พยายามจัดความสูงให้เท่า Code Box */
+}
+/* --- 🟢 สิ้นสุดการปรับ CSS --- */
 </style>
 """, unsafe_allow_html=True)
 # --- จบ Custom CSS ---
@@ -34,7 +58,7 @@ div[data-testid="stHorizontalBlock"] > div:nth-child(3) .stButton button {
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
 st.set_page_config(page_title="Box Scanner", layout="wide")
-st.title("📦 App สแกน Tracking และ Barcode")
+st.title("📦 App สแกน Tracking")
 
 @st.cache_resource
 def init_supabase_connection():
@@ -56,7 +80,8 @@ if "staged_scans" not in st.session_state:
 if "show_dialog_for" not in st.session_state:
     st.session_state.show_dialog_for = None 
 
-# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
+# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) (เหมือนเดิม) ---
+# (Bug ล้างค่า User แก้ไขแล้วใน Code ก่อนหน้า)
 
 def delete_item(item_id_to_delete):
     st.session_state.staged_scans = [
@@ -77,7 +102,6 @@ def add_and_clear_staging():
     st.rerun() 
 
 def save_all_to_db():
-    """ฟังก์ชันสำหรับบันทึกข้อมูลทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
         st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
         return
@@ -88,7 +112,7 @@ def save_all_to_db():
         
         for item in st.session_state.staged_scans:
             data_to_insert.append({
-                "user_id": st.session_state.current_user, # 🟢 (แก้ไข) ใช้ st.session_state.current_user โดยตรง
+                "user_id": st.session_state.current_user,
                 "tracking_code": item["tracking"],
                 "product_barcode": item["barcode"],
                 "created_at": current_time.replace(tzinfo=None) 
@@ -106,7 +130,7 @@ def save_all_to_db():
         st.session_state.scan_count += saved_count
         st.session_state.staged_scans = []
         
-        # 🟢 (แก้ไข) ล้างค่า "current_user" (ซึ่งผูกกับ key ของ text_input)
+        # (แก้ไขบั๊กล้างค่า)
         st.session_state.current_user = "" 
         
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
@@ -147,109 +171,99 @@ with tab1:
 
     col_user, col_metric = st.columns([3, 2]) 
     with col_user:
-        # 🟢 (แก้ไข) เราจะใช้ key="current_user"
-        # เพื่อผูก text_input กับ st.session_state.current_user โดยตรง
+        # (แก้ไขบั๊กล้างค่า)
         st.text_input("ชื่อผู้ใช้งาน (User):", 
                       key="current_user") 
-        # ❌ (ลบ) ลบบรรทัด st.session_state.current_user = st.session_state.user_input_box ทิ้ง
         
     with col_metric:
         st.metric("กล่องใน DB (รอบนี้)", st.session_state.scan_count)
 
-    # 🟢 (แก้ไข) Logic นี้จะทำงานถูกต้องแล้ว
     if not st.session_state.current_user:
-        st.warning("กรุณาป้อนชื่อผู้ใช้งานก่อนเริ่มสแกน")
+        st.warning("ใส่ชื่อผู้ใช้งานก่อนเริ่มสแกน")
     else:
         
-        # --- (Code ที่เหลือเหมือนเดิมทั้งหมด) ---
+        # --- (Code ที่เหลือเหมือนเดิมทั้งหมด ยกเว้น "ส่วนที่ 3") ---
         
-        # --- Logic การแสดง Dialog ---
         if st.session_state.show_dialog_for == 'tracking':
              show_confirmation_dialog(is_tracking=True)
         elif st.session_state.show_dialog_for == 'barcode':
              show_confirmation_dialog(is_tracking=False)
              
-        # --- ส่วนที่ 1: กล้องสแกน ---
         st.subheader("1. สแกนที่นี่ (Scan Here)")
         
         if st.session_state.show_dialog_for is None:
             if not st.session_state.temp_tracking:
-                st.info("ขั้นตอนที่ 1: กรุณาสแกน Tracking...")
+                st.info("ขั้นตอนที่ 1: สแกน Tracking...")
             elif not st.session_state.temp_barcode:
-                 st.success("ขั้นตอนที่ 2: กรุณาสแกน Barcode...")
+                 st.success("ขั้นตอนที่ 2: สแกน Barcode...")
             else:
-                 st.success("สำเร็จ! กรุณาเริ่มสแกน Tracking กล่องถัดไปได้เลย")
+                 st.success("สำเร็จ! เริ่มสแกน Tracking กล่องถัดไป")
                  st.session_state.temp_tracking = "" 
                  st.rerun() 
 
             scan_value = qrcode_scanner(key="main_scanner")
 
             if scan_value:
-                # Logic 1
                 if not st.session_state.temp_tracking:
                     st.session_state.temp_tracking = scan_value
                     st.session_state.show_dialog_for = 'tracking' 
                     st.rerun() 
-                
-                # Logic 2
                 elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
                     if scan_value != st.session_state.temp_tracking:
                         st.session_state.temp_barcode = scan_value
                         st.session_state.show_dialog_for = 'barcode' 
                         st.rerun() 
-                    
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
                     st.warning("กรุณารอสักครู่ (ระบบกำลังเพิ่มรายการ) หรือเริ่มสแกน Tracking ถัดไปได้เลย")
-        
         else:
             st.info(f"... กรุณากด 'ปิด' ใน Popup ยืนยัน {st.session_state.show_dialog_for.capitalize()} ...")
 
-        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว ---
         st.subheader("2. ข้อมูลที่กำลังสแกน")
         
         col_t, col_b = st.columns(2)
         with col_t:
-            st.text_input(
-                "Tracking", 
-                value=st.session_state.temp_tracking, 
-                disabled=True,
-                label_visibility="collapsed" 
-            )
+            st.text_input("Tracking", value=st.session_state.temp_tracking, 
+                          disabled=True, label_visibility="collapsed")
             st.caption("Tracking ที่สแกนได้") 
         with col_b:
-            st.text_input(
-                "Barcode", 
-                value=st.session_state.temp_barcode, 
-                disabled=True,
-                label_visibility="collapsed" 
-            )
+            st.text_input("Barcode", value=st.session_state.temp_barcode, 
+                          disabled=True, label_visibility="collapsed")
             st.caption("Barcode ที่สแกนได้") 
         
         st.divider()
 
-        # --- ส่วนที่ 3: ตารางพักข้อมูล (Staging Area) ---
+        # --- 🟢 (ปรับ) ส่วนที่ 3: ตารางพักข้อมูล (Layout แบบ Card) 🟢 ---
         st.subheader(f"3. รายการที่รอ C ({len(st.session_state.staged_scans)} รายการ)")
         
-        h_col1, h_col2, h_col3 = st.columns([3, 3, 1])
-        h_col1.markdown("**Tracking**")
-        h_col2.markdown("**Barcode**")
-        h_col3.markdown("**ลบ**")
+        # ❌ (ลบ) ลบ Header ของตารางเก่าทิ้ง
+        # h_col1, h_col2, h_col3 = st.columns([3, 3, 1]) ...
 
         if not st.session_state.staged_scans:
             st.info("ยังไม่มีรายการสแกน กรุณาสแกน Tracking และ Barcode")
         else:
-            for item in st.session_state.staged_scans:
-                r_col1, r_col2, r_col3 = st.columns([3, 3, 1])
-                r_col1.code(item["tracking"])
-                r_col2.code(item["barcode"])
-                r_col3.button("❌ ลบ", 
-                              key=f"del_{item['id']}", 
-                              on_click=delete_item, 
-                              args=(item['id'],),
-                              use_container_width=True
-                             )
+            # (ใหม่) วนลูปและสร้าง "Card" ในแต่ละรอบ
+            for item in reversed(st.session_state.staged_scans): # (ใหม่) reversed() เพื่อให้ของใหม่อยู่บน
+                with st.container(border=True):
+                    # แถวที่ 1: Tracking
+                    st.caption("Tracking:")
+                    st.code(item["tracking"])
+                    
+                    # แถวที่ 2: Barcode + ปุ่มลบ
+                    st.caption("Barcode:")
+                    col_b, col_del = st.columns([4, 1]) # อัตราส่วน 4:1
+                    
+                    with col_b:
+                        st.code(item["barcode"])
+                    with col_del:
+                        st.button("❌", 
+                                  key=f"del_{item['id']}", 
+                                  on_click=delete_item, 
+                                  args=(item['id'],),
+                                  use_container_width=True
+                                 )
         
-        st.button("💾 บันทึกทั้งหมดลง Database",
+        # --- (ปุ่มบันทึกเหมือนเดิม) ---
+        st.button("💾 บันทึกทั้งหมด",
                   type="primary",
                   use_container_width=True,
                   on_click=save_all_to_db,
