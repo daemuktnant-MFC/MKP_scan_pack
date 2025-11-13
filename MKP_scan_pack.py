@@ -157,9 +157,11 @@ with tab1:
     st.header("บันทึกการสแกน")
 
     # --- 🟢 (แก้ไข) Logic แสดง "กล่อง Error" 🟢 ---
+    # เราจะแสดงกล่อง Error ถ้าธงเป็น True
+    # และจะไม่ล้างธง จนกว่าจะสแกน Barcode ถูก
     if st.session_state.get("show_scan_error_message", False):
         st.error("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
-        st.session_state.show_scan_error_message = False # เคลียร์ธง
+        # ❌ (ลบ) ลบบรรทัด st.session_state.show_scan_error_message = False ทิ้ง
     # --- 🟢 สิ้นสุด 🟢 ---
 
     col_user, col_metric = st.columns([3, 2]) 
@@ -183,7 +185,9 @@ with tab1:
             if not st.session_state.temp_tracking:
                 st.info("ขั้นตอนที่ 1: สแกน Tracking...")
             elif not st.session_state.temp_barcode:
-                 st.success("ขั้นตอนที่ 2: สแกน Barcode...")
+                 # (ปรับ) ถ้ามี Error ให้แสดง Info แทน Success
+                 if not st.session_state.show_scan_error_message:
+                     st.success("ขั้นตอนที่ 2: สแกน Barcode...")
             else:
                  st.success("สำเร็จ! เริ่มสแกน Tracking กล่องถัดไป")
                  st.session_state.temp_tracking = "" 
@@ -204,14 +208,14 @@ with tab1:
                         # (ถูกต้อง) นี่คือ Barcode
                         st.session_state.temp_barcode = scan_value
                         st.session_state.show_dialog_for = 'barcode' 
+                        # --- 🟢 (แก้ไข) ล้างธง Error ที่นี่ 🟢 ---
+                        st.session_state.show_scan_error_message = False 
                         st.rerun() 
                     
-                    # --- 🟢 นี่คือการแก้ไขที่ต้องการ 🟢 ---
                     else:
                         # (สแกนซ้ำ) นี่คือ Tracking เดิม
                         st.session_state.show_scan_error_message = True # 1. ตั้งธง
                         st.rerun() # 2. บังคับ rerun
-                    # --- 🟢 สิ้นสุดการแก้ไข 🟢 ---
                         
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
                     st.warning("รอสักครู่ (ระบบกำลังเพิ่มรายการ) หรือเริ่มสแกน Tracking ถัดไปได้เลย")
