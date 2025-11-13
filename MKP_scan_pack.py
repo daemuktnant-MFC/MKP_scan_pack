@@ -8,7 +8,6 @@ import uuid
 import pytz 
 
 # --- (ใหม่) 0. เพิ่ม Custom CSS สำหรับ Mobile Layout ---
-# นี่คือส่วนที่ปรับขนาดตัวอักษรและช่องว่างทั้งหมด
 st.markdown("""
 <style>
 /* 1. Base Layout: ใช้พื้นที่เต็มจอและลดพื้นที่ว่าง */
@@ -46,11 +45,6 @@ h3 {
 
 /* 4. Staging Table: ทำให้ตารางพักข้อมูลกระชับ */
 /* 4.1 ทำให้ปุ่มลบ (❌) เล็กและกระชับ */
-/* เราใช้ Selector ที่เจาะจงมาก:
-   เลือกปุ่ม (button) ที่อยู่ใน div.stButton
-   ที่อยู่ใน div ที่เป็นลูกคนที่ 3 (nth-child(3)) 
-   ของ div ที่มี data-testid="stHorizontalBlock" (แถวของตาราง)
-*/
 div[data-testid="stHorizontalBlock"] > div:nth-child(3) .stButton button {
     font-size: 0.8rem !important;
     padding: 0.2em 0.4em !important;
@@ -91,7 +85,7 @@ if "staged_scans" not in st.session_state:
 if "show_dialog_for" not in st.session_state:
     st.session_state.show_dialog_for = None 
 
-# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) (เหมือนเดิม) ---
+# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
 
 def delete_item(item_id_to_delete):
     st.session_state.staged_scans = [
@@ -112,6 +106,7 @@ def add_and_clear_staging():
     st.rerun() 
 
 def save_all_to_db():
+    """ฟังก์ชันสำหรับบันทึกข้อมูลทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
         st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
         return
@@ -125,7 +120,7 @@ def save_all_to_db():
                 "user_id": st.session_state.current_user,
                 "tracking_code": item["tracking"],
                 "product_barcode": item["barcode"],
-                "created_at": current_time.replace(tzinfo=None)
+                "created_at": current_time.replace(tzinfo=None) 
             })
         
         df_to_insert = pd.DataFrame(data_to_insert)
@@ -139,8 +134,13 @@ def save_all_to_db():
         saved_count = len(st.session_state.staged_scans)
         st.session_state.scan_count += saved_count
         st.session_state.staged_scans = []
+        
+        # --- 🟢 นี่คือการแก้ไขที่ต้องการ 🟢 ---
+        st.session_state.current_user = "" # ล้างค่าผู้ใช้งาน
+        # --- 🟢 สิ้นสุดการแก้ไข 🟢 ---
+        
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
-        st.rerun()
+        st.rerun() 
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
 
@@ -175,10 +175,15 @@ tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อ�
 with tab1:
     st.header("บันทึกการสแกน")
 
-    # (ปรับ) ใช้ columns เพื่อจัด "ชื่อผู้ใช้" และ "จำนวนกล่อง" ให้อยู่บรรทัดเดียวกัน
-    col_user, col_metric = st.columns([3, 2]) # 3:2 ratio
+    col_user, col_metric = st.columns([3, 2]) 
     with col_user:
-        st.session_state.current_user = st.text_input("ชื่อผู้ใช้งาน (User):", st.session_state.current_user) 
+        # (ปรับ) ควบคุมค่าด้วย key เพื่อให้ st.rerun() ทำงานถูกต้อง
+        st.text_input("ชื่อผู้ใช้งาน (User):", 
+                      value=st.session_state.current_user, 
+                      key="user_input_box")
+        # อัปเดต State จาก Input Box
+        st.session_state.current_user = st.session_state.user_input_box
+        
     with col_metric:
         st.metric("กล่องใน DB (รอบนี้)", st.session_state.scan_count)
 
@@ -201,9 +206,8 @@ with tab1:
             elif not st.session_state.temp_barcode:
                  st.success("ขั้นตอนที่ 2: กรุณาสแกน Barcode...")
             else:
-                 # (ปรับ) Logic นี้จะทำงานเมื่อกด "เพิ่มรายการ" แล้ว
                  st.success("สำเร็จ! กรุณาเริ่มสแกน Tracking กล่องถัดไปได้เลย")
-                 st.session_state.temp_tracking = "" # เคลียร์ค่าค้าง
+                 st.session_state.temp_tracking = "" 
                  st.rerun() 
 
             scan_value = qrcode_scanner(key="main_scanner")
@@ -228,36 +232,32 @@ with tab1:
         else:
             st.info(f"... กรุณากด 'ปิด' ใน Popup ยืนยัน {st.session_state.show_dialog_for.capitalize()} ...")
 
-        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว (ปรับ Layout) ---
+        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว (เหมือนเดิม) ---
         st.subheader("2. ข้อมูลที่กำลังสแกน")
         
-        # (ปรับ) ใช้ columns และ label_visibility="collapsed" เพื่อความกระชับ
         col_t, col_b = st.columns(2)
         with col_t:
             st.text_input(
                 "Tracking", 
                 value=st.session_state.temp_tracking, 
                 disabled=True,
-                label_visibility="collapsed" # ซ่อน Label ด้านบน
+                label_visibility="collapsed" 
             )
-            st.caption("Tracking ที่สแกนได้") # ใช้ Caption แทน
+            st.caption("Tracking ที่สแกนได้") 
         with col_b:
             st.text_input(
                 "Barcode", 
                 value=st.session_state.temp_barcode, 
                 disabled=True,
-                label_visibility="collapsed" # ซ่อน Label ด้านบน
+                label_visibility="collapsed" 
             )
-            st.caption("Barcode ที่สแกนได้") # ใช้ Caption แทน
+            st.caption("Barcode ที่สแกนได้") 
         
-        # (ปุ่ม "เพิ่ม" ถูกลบไปแล้ว)
-
         st.divider()
 
-        # --- ส่วนที่ 3: ตารางพักข้อมูล (Staging Area) (ปรับ Layout) ---
+        # --- ส่วนที่ 3: ตารางพักข้อมูล (Staging Area) (เหมือนเดิม) ---
         st.subheader(f"3. รายการที่รอ C ({len(st.session_state.staged_scans)} รายการ)")
         
-        # (ปรับ) ใช้ columns [3, 3, 1] เพื่อให้ปุ่มลบมีขนาดเล็ก
         h_col1, h_col2, h_col3 = st.columns([3, 3, 1])
         h_col1.markdown("**Tracking**")
         h_col2.markdown("**Barcode**")
@@ -266,7 +266,6 @@ with tab1:
         if not st.session_state.staged_scans:
             st.info("ยังไม่มีรายการสแกน กรุณาสแกน Tracking และ Barcode")
         else:
-            # (ปรับ) CSS ที่เราเพิ่มด้านบน จะทำให้ปุ่ม "ลบ" และ "Code" เล็กลงอัตโนมัติ
             for item in st.session_state.staged_scans:
                 r_col1, r_col2, r_col3 = st.columns([3, 3, 1])
                 r_col1.code(item["tracking"])
@@ -288,7 +287,7 @@ with tab1:
 # --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เหมือนเดิม) ---
 with tab2:
     st.header("ค้นหาและดาวน์โหลดข้อมูล")
-    # (Code ใน Tab 2 ไม่ได้แก้ไข)
+    
     with st.expander("ตัวกรองข้อมูล (Filter)", expanded=True):
         col_f1, col_col2 = st.columns(2)
         with col_f1:
