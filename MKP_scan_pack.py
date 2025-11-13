@@ -7,55 +7,26 @@ from streamlit_qrcode_scanner import qrcode_scanner
 import uuid 
 import pytz 
 
-# --- (ใหม่) 0. เพิ่ม Custom CSS สำหรับ Mobile Layout ---
+# --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
 st.markdown("""
 <style>
-/* 1. Base Layout: ใช้พื้นที่เต็มจอและลดพื้นที่ว่าง */
 div.block-container {
-    padding-top: 1rem; /* ลดพื้นที่ว่างด้านบน */
-    padding-bottom: 1rem;
-    padding-left: 1rem; /* ลดขอบซ้าย */
-    padding-right: 1rem; /* ลดขอบขวา */
+    padding-top: 1rem; padding-bottom: 1rem;
+    padding-left: 1rem; padding-right: 1rem;
 }
-
-/* 2. Header & Title: ปรับขนาดตัวอักษรให้เล็กลง */
-h1 {
-    font-size: 1.8rem !important; /* 📦 App สแกน... */
-    margin-bottom: 0.5rem;
-}
-h3 {
-    font-size: 1.15rem !important; /* 1. สแกนที่นี่... */
-    margin-top: 1rem;
-    margin-bottom: 0.5rem;
-}
-
-/* 3. Metric: ทำให้ Metric (จำนวนกล่อง) กระชับขึ้น */
+h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
+h3 { font-size: 1.15rem !important; margin-top: 1rem; margin-bottom: 0.5rem; }
 [data-testid="stMetric"] {
-    padding-top: 0 !important; /* จัดให้ตรงกับช่อง User Input */
-    background-color: #FAFAFA; /* สีพื้นหลังให้ดูต่าง */
-    border-radius: 0.5rem;
-    padding: 0.5rem 1rem !important;
+    padding-top: 0 !important; background-color: #FAFAFA;
+    border-radius: 0.5rem; padding: 0.5rem 1rem !important;
 }
-[data-testid="stMetricValue"] {
-    font-size: 1.8rem !important;
-}
-[data-testid="stMetricLabel"] {
-    font-size: 0.9rem !important;
-}
-
-/* 4. Staging Table: ทำให้ตารางพักข้อมูลกระชับ */
-/* 4.1 ทำให้ปุ่มลบ (❌) เล็กและกระชับ */
+[data-testid="stMetricValue"] { font-size: 1.8rem !important; }
+[data-testid="stMetricLabel"] { font-size: 0.9rem !important; }
 div[data-testid="stHorizontalBlock"] > div:nth-child(3) .stButton button {
-    font-size: 0.8rem !important;
-    padding: 0.2em 0.4em !important;
+    font-size: 0.8rem !important; padding: 0.2em 0.4em !important;
     height: auto !important;
 }
-
-/* 4.2 ทำให้ Code Box (Tracking/Barcode) ในตารางเล็กและอ่านง่าย */
-.stCode {
-    font-size: 0.75rem !important;
-    padding: 0.4em !important;
-}
+.stCode { font-size: 0.75rem !important; padding: 0.4em !important; }
 </style>
 """, unsafe_allow_html=True)
 # --- จบ Custom CSS ---
@@ -117,7 +88,7 @@ def save_all_to_db():
         
         for item in st.session_state.staged_scans:
             data_to_insert.append({
-                "user_id": st.session_state.current_user,
+                "user_id": st.session_state.current_user, # 🟢 (แก้ไข) ใช้ st.session_state.current_user โดยตรง
                 "tracking_code": item["tracking"],
                 "product_barcode": item["barcode"],
                 "created_at": current_time.replace(tzinfo=None) 
@@ -135,9 +106,8 @@ def save_all_to_db():
         st.session_state.scan_count += saved_count
         st.session_state.staged_scans = []
         
-        # --- 🟢 นี่คือการแก้ไขที่ต้องการ 🟢 ---
-        st.session_state.current_user = "" # ล้างค่าผู้ใช้งาน
-        # --- 🟢 สิ้นสุดการแก้ไข 🟢 ---
+        # 🟢 (แก้ไข) ล้างค่า "current_user" (ซึ่งผูกกับ key ของ text_input)
+        st.session_state.current_user = "" 
         
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
         st.rerun() 
@@ -177,27 +147,29 @@ with tab1:
 
     col_user, col_metric = st.columns([3, 2]) 
     with col_user:
-        # (ปรับ) ควบคุมค่าด้วย key เพื่อให้ st.rerun() ทำงานถูกต้อง
+        # 🟢 (แก้ไข) เราจะใช้ key="current_user"
+        # เพื่อผูก text_input กับ st.session_state.current_user โดยตรง
         st.text_input("ชื่อผู้ใช้งาน (User):", 
-                      value=st.session_state.current_user, 
-                      key="user_input_box")
-        # อัปเดต State จาก Input Box
-        st.session_state.current_user = st.session_state.user_input_box
+                      key="current_user") 
+        # ❌ (ลบ) ลบบรรทัด st.session_state.current_user = st.session_state.user_input_box ทิ้ง
         
     with col_metric:
         st.metric("กล่องใน DB (รอบนี้)", st.session_state.scan_count)
 
+    # 🟢 (แก้ไข) Logic นี้จะทำงานถูกต้องแล้ว
     if not st.session_state.current_user:
         st.warning("กรุณาป้อนชื่อผู้ใช้งานก่อนเริ่มสแกน")
     else:
         
-        # --- Logic การแสดง Dialog (เหมือนเดิม) ---
+        # --- (Code ที่เหลือเหมือนเดิมทั้งหมด) ---
+        
+        # --- Logic การแสดง Dialog ---
         if st.session_state.show_dialog_for == 'tracking':
              show_confirmation_dialog(is_tracking=True)
         elif st.session_state.show_dialog_for == 'barcode':
              show_confirmation_dialog(is_tracking=False)
              
-        # --- ส่วนที่ 1: กล้องสแกน (เหมือนเดิม) ---
+        # --- ส่วนที่ 1: กล้องสแกน ---
         st.subheader("1. สแกนที่นี่ (Scan Here)")
         
         if st.session_state.show_dialog_for is None:
@@ -213,13 +185,13 @@ with tab1:
             scan_value = qrcode_scanner(key="main_scanner")
 
             if scan_value:
-                # Logic 1: สแกน Tracking
+                # Logic 1
                 if not st.session_state.temp_tracking:
                     st.session_state.temp_tracking = scan_value
                     st.session_state.show_dialog_for = 'tracking' 
                     st.rerun() 
                 
-                # Logic 2: สแกน Barcode
+                # Logic 2
                 elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
                     if scan_value != st.session_state.temp_tracking:
                         st.session_state.temp_barcode = scan_value
@@ -232,7 +204,7 @@ with tab1:
         else:
             st.info(f"... กรุณากด 'ปิด' ใน Popup ยืนยัน {st.session_state.show_dialog_for.capitalize()} ...")
 
-        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว (เหมือนเดิม) ---
+        # --- ส่วนที่ 2: แสดงผลค่าที่สแกนได้ชั่วคราว ---
         st.subheader("2. ข้อมูลที่กำลังสแกน")
         
         col_t, col_b = st.columns(2)
@@ -255,7 +227,7 @@ with tab1:
         
         st.divider()
 
-        # --- ส่วนที่ 3: ตารางพักข้อมูล (Staging Area) (เหมือนเดิม) ---
+        # --- ส่วนที่ 3: ตารางพักข้อมูล (Staging Area) ---
         st.subheader(f"3. รายการที่รอ C ({len(st.session_state.staged_scans)} รายการ)")
         
         h_col1, h_col2, h_col3 = st.columns([3, 3, 1])
