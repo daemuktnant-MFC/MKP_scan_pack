@@ -260,17 +260,32 @@ with tab1:
                                   use_container_width=True
                                  )
 
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เหมือนเดิม) ---
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข From-To) ---
 with tab2:
     st.header("ค้นหาและดาวน์โหลดข้อมูล")
+    
+    show_error = False # (ใหม่) สร้างธงสำหรับ Error
     
     with st.expander("ตัวกรองข้อมูล (Filter)", expanded=True):
         col_f1, col_col2 = st.columns(2)
         with col_f1:
             filter_user = st.text_input("กรองตาม User (เว้นว่างเพื่อแสดงทั้งหมด)")
+        
+        # --- 🟢 (แก้ไข) เปลี่ยนเป็น From-To ---
         with col_col2:
-            filter_date = st.date_input("กรองตามวันที่", value=None) 
-            
+            # (ใหม่) แบ่ง 2 คอลัมน์ย่อยสำหรับ From/To
+            sub_col1, sub_col2 = st.columns(2)
+            with sub_col1:
+                start_date = st.date_input("From (จากวันที่)", value=None)
+            with sub_col2:
+                end_date = st.date_input("To (ถึงวันที่)", value=None)
+        # --- 🟢 สิ้นสุด 🟢 ---
+        
+        # (ใหม่) ตรวจสอบ Error ของวันที่
+        if start_date and end_date and start_date > end_date:
+            st.error("วันที่เริ่มต้น (From) ต้องมาก่อนวันที่สิ้นสุด (To)")
+            show_error = True # ตั้งธง Error
+
     st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
     st.divider()
 
@@ -281,15 +296,31 @@ with tab2:
         if filter_user:
             filters.append("user_id = :user")
             params["user"] = filter_user
-        if filter_date:
-            filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') = :date")
-            params["date"] = filter_date
+        
+        # --- 🟢 (แก้ไข) Logic การกรองวันที่ ---
+        if not show_error: # ถ้าไม่มี Error เรื่องวันที่ ให้เพิ่ม filter
+            if start_date and end_date:
+                filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') BETWEEN :start AND :end")
+                params["start"] = start_date
+                params["end"] = end_date
+            elif start_date:
+                filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') >= :start")
+                params["start"] = start_date
+            elif end_date:
+                filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') <= :end")
+                params["end"] = end_date
+        # --- 🟢 สิ้นสุด 🟢 ---
             
         if filters:
             query += " WHERE " + " AND ".join(filters)
         
         query += " ORDER BY created_at DESC"
-        data_df = supabase_conn.query(query, params=params)
+        
+        # (ใหม่) ถ้ามี Error ให้ข้ามการ Query
+        if show_error:
+            data_df = pd.DataFrame() # สร้าง DataFrame ว่างเปล่า
+        else:
+            data_df = supabase_conn.query(query, params=params)
         
         if not data_df.empty:
             st.dataframe(data_df, use_container_width=True)
@@ -307,7 +338,9 @@ with tab2:
                 mime="text/csv",
             )
         else:
-            st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
+            # ถ้ามี Error ให้เงียบไป (เพราะ st.error แสดงไปแล้ว)
+            if not show_error:
+                st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
             
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
