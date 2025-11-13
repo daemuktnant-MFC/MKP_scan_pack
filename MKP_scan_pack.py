@@ -280,4 +280,30 @@ with tab2:
             filters.append("user_id = :user")
             params["user"] = filter_user
         if filter_date:
-            filters.append
+            filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') = :date")
+            params["date"] = filter_date
+            
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+        
+        query += " ORDER BY created_at DESC"
+        data_df = supabase_conn.query(query, params=params)
+        
+        if not data_df.empty:
+            st.dataframe(data_df, use_container_width=True)
+            @st.cache_data
+            def convert_df_to_csv(df_to_convert):
+                return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            
+            csv_data = convert_df_to_csv(data_df)
+            
+            st.download_button(
+                label="📥 Download ข้อมูลเป็น CSV",
+                data=csv_data,
+                file_name=f"scan_export_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
