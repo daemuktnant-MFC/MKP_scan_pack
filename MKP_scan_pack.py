@@ -218,7 +218,7 @@ with tab1:
                  )
 
         # --- (ปรับ) ส่วนที่ 3: ตารางพักข้อมูล (Layout แบบ Card) ---
-        st.subheader(f"3. รายการที่รอ C ({len(st.session_state.staged_scans)} รายการ)")
+        st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
         
         if not st.session_state.staged_scans:
             st.info("ยังไม่มีรายการสแกน สแกน Tracking และ Barcode")
