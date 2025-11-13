@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import io
+# import io  <- ลบออก
 from datetime import datetime
 from streamlit.connections import SQLConnection
 from streamlit_qrcode_scanner import qrcode_scanner
@@ -59,21 +59,21 @@ def init_supabase_connection():
 
 supabase_conn = init_supabase_connection()
 
-# --- 2. สร้าง Session State (ปรับปรุงสำหรับ Logic ใหม่) ---
+# --- 2. สร้าง Session State ---
 if "current_user" not in st.session_state:
     st.session_state.current_user = ""
 if "scan_count" not in st.session_state:
-    st.session_state.scan_count = 0 # (ใหม่) จะใช้เป็น "ยอดสะสม" ที่บันทึกไปแล้ว
+    st.session_state.scan_count = 0 
 if "temp_barcode" not in st.session_state:
-    st.session_state.temp_barcode = "" # นี่คือ Barcode ที่จะใช้สำหรับทุก Tracking
+    st.session_state.temp_barcode = "" 
 if "staged_scans" not in st.session_state:
-    st.session_state.staged_scans = [] # รายการ Tracking ที่รอการบันทึก
+    st.session_state.staged_scans = [] 
 if "show_duplicate_tracking_error" not in st.session_state:
-    st.session_state.show_duplicate_tracking_error = False # ธงสำหรับแจ้งเตือน Tracking ซ้ำ
+    st.session_state.show_duplicate_tracking_error = False 
 if "last_scanned_tracking" not in st.session_state:
-    st.session_state.last_scanned_tracking = "" # สำหรับแสดงข้อความ Error ว่า Tracking ไหนซ้ำ
+    st.session_state.last_scanned_tracking = "" 
 
-# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) (ปรับปรุง) ---
+# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
 
 def delete_item(item_id_to_delete):
     """ลบรายการเดียวออกจาก Staging list"""
@@ -82,13 +82,18 @@ def delete_item(item_id_to_delete):
         if item["id"] != item_id_to_delete
     ]
 
-def clear_barcode_and_staging():
-    """(ใหม่) ล้าง Barcode ที่ล็อคไว้ และล้าง Staging list ทั้งหมด"""
+# 🟢 (แก้ไข) ย้ายฟังก์ชันนี้ออกมาอยู่ข้างนอก
+def clear_all_and_restart():
+    """(ใหม่) ล้างทุกอย่างและเริ่มใหม่ทั้งหมด (User, Barcode, Staging)"""
+    st.session_state.current_user = ""
     st.session_state.temp_barcode = ""
     st.session_state.staged_scans = []
     st.session_state.show_duplicate_tracking_error = False
     st.session_state.last_scanned_tracking = ""
-    st.rerun()
+    # ไม่ต้องมี st.rerun() เพราะ on_click จะทำเอง
+
+# ❌ (ลบ) ฟังก์ชันนี้ไม่ได้ใช้งานแล้ว
+# def clear_barcode_and_staging(): ...
 
 def save_all_to_db():
     """บันทึก Staging list ทั้งหมดลง Database"""
@@ -107,16 +112,14 @@ def save_all_to_db():
         THAI_TZ = pytz.timezone("Asia/Bangkok")
         current_time = datetime.now(THAI_TZ)
         
-        # วนลูปสร้าง list ของ dicts ที่จะ insert
         for item in st.session_state.staged_scans:
             data_to_insert.append({
                 "user_id": st.session_state.current_user,
                 "tracking_code": item["tracking"],
-                "product_barcode": item["barcode"], # Barcode จะมาจาก item ใน list
+                "product_barcode": item["barcode"], 
                 "created_at": current_time.replace(tzinfo=None) 
             })
         
-        # แปลงเป็น DataFrame และ Insert ลง SQL
         df_to_insert = pd.DataFrame(data_to_insert)
         df_to_insert.to_sql(
             "scans", 
@@ -125,29 +128,15 @@ def save_all_to_db():
             index=False
         )
         
-        # เคลียร์ค่าหลังจากบันทึกสำเร็จ
         saved_count = len(st.session_state.staged_scans)
-        st.session_state.scan_count += saved_count # เพิ่มยอดสะสม
+        st.session_state.scan_count += saved_count 
 
-        # --- 🟢 (แก้ไข) เคลียร์ค่าทั้งหมด ---
-        #st.session_state.staged_scans = []
-        #st.session_state.temp_barcode = "" 
-        #st.session_state.show_duplicate_tracking_error = False
-        #st.session_state.last_scanned_tracking = ""
-        #st.session_state.current_user = "" # <-- 🟢 (แก้ไข) เพิ่มบรรทัดนี้เพื่อล้างค่า User
-        def clear_all_and_restart():
-        """(ใหม่) ล้างทุกอย่างและเริ่มใหม่ทั้งหมด (User, Barcode, Staging)"""
-        st.session_state.current_user = ""
-        st.session_state.temp_barcode = ""
-        st.session_state.staged_scans = []
-        st.session_state.show_duplicate_tracking_error = False
-        st.session_state.last_scanned_tracking = ""
+        # --- 🟢 (แก้ไข) เรียกใช้ฟังก์ชันล้างค่า ---
+        clear_all_and_restart()
         # --- 🟢 สิ้นสุด 🟢 ---
         
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
-        
-        # ❌ (แก้ไข) ลบ st.rerun() ออก เพราะ on_click จะ Rerun ให้อัตโนมัติ
-        # st.rerun() 
+        # ❌ (ลบ) st.rerun() ที่ไม่จำเป็นออก
         
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
@@ -155,10 +144,9 @@ def save_all_to_db():
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (แก้ไข Logic การ Rerun) ---
-# --- TAB 1: หน้าสแกน (ปรับ Logic เหลือปุ่มฉุกเฉินปุ่มเดียว) ---
+# --- TAB 1: หน้าสแกน ---
 with tab1:
-    #st.header("บันทึกการสแกน")
+    st.header("บันทึกการสแกน") # 🟢 (แก้ไข) นำ Header กลับมา
 
     # --- ส่วนที่ 1: แสดงผล (Display Area) ---
     col_user_display, col_metric = st.columns([3, 2])
@@ -166,7 +154,6 @@ with tab1:
     with col_user_display:
         st.subheader("1. ผู้ใช้งาน (User)")
         if st.session_state.current_user:
-            # (คงเดิม) แสดง User ที่ล็อค และปุ่มล้างหลัก
             st.code(st.session_state.current_user)
             st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart)
         else:
@@ -193,7 +180,6 @@ with tab1:
         if scan_value:
             st.session_state.current_user = scan_value
             st.success(f"User: {scan_value} ถูกล็อคแล้ว")
-            # (ไม่ต้อง rerun)
 
     # --- 2B: State 2: มี User, ไม่มี Barcode (บังคับสแกน Barcode) ---
     elif not st.session_state.temp_barcode:
@@ -208,16 +194,13 @@ with tab1:
             else:
                 st.session_state.temp_barcode = scan_value
                 st.success(f"Barcode: {scan_value} ถูกล็อคแล้ว")
-                # (ไม่ต้อง rerun)
 
     # --- 2C: State 3: มี User และ Barcode (พร้อมสแกน Tracking) ---
     else:
-        # --- 🟢 (แก้ไข) ลบปุ่ม "เปลี่ยน Barcode" ออก ---
         st.subheader("2. Barcode ที่ล็อคอยู่")
         st.code(st.session_state.temp_barcode)
-        # st.button("❌ เปลี่ยน/ล้าง Barcode นี้ (และเริ่มใหม่)", on_click=clear_barcode_and_staging) # <-- ❌ ลบปุ่มนี้ออก
+        # ❌ (ลบ) ปุ่ม "เปลี่ยน Barcode" ที่ไม่ใช้งานออก
         st.divider()
-        # --- 🟢 สิ้นสุด 🟢 ---
         
         st.subheader("ขั้นตอนที่ 3: สแกน Tracking Number")
 
@@ -246,7 +229,6 @@ with tab1:
                 })
                 st.session_state.show_duplicate_tracking_error = False
                 st.success(f"เพิ่ม Tracking: {scan_value} สำเร็จ!")
-                # (ไม่ต้อง rerun)
 
     st.divider()
 
@@ -260,7 +242,6 @@ with tab1:
 
     st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
     
-    # (ส่วนที่เหลือของ tab1 เหมือนเดิม)
     if not st.session_state.staged_scans:
         if st.session_state.temp_barcode:
             st.info(f"ยังไม่มีรายการสแกน... (Barcode ที่ใช้คือ: {st.session_state.temp_barcode})")
@@ -296,7 +277,6 @@ with tab2:
         with col_col2:
             filter_date = st.date_input("กรองตามวันที่", value=None) 
             
-    # (ใหม่) แสดงยอดสะสมที่บันทึกไปในรอบนี้
     st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
     st.divider()
 
@@ -308,7 +288,6 @@ with tab2:
             filters.append("user_id = :user")
             params["user"] = filter_user
         if filter_date:
-            # (ปรับ) แก้ไขการ Query วันที่สำหรับ Supabase/Postgres
             filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') = :date")
             params["date"] = filter_date
             
@@ -323,7 +302,6 @@ with tab2:
             
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
-                # (ปรับ) บังคับ Encoding เป็น utf-8-sig เพื่อกันภาษาไทยเพี้ยนใน Excel
                 return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             
             csv_data = convert_df_to_csv(data_df)
@@ -338,5 +316,4 @@ with tab2:
             st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
             
     except Exception as e:
-        # (ปรับ) ใช้ st.error แทน st.error เพื่อให้ชัดเจน
         st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
