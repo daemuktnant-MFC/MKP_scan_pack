@@ -1,6 +1,7 @@
 streamlit>=1.32.0
 pandas
-streamlit-qrcode-scanner
-psycopg2-binary
-sqlalchemy
 pytz
+streamlit-qrcode-scanner
+streamlit-supabase-connection
+SQLAlchemy
+psycopg2-binary
