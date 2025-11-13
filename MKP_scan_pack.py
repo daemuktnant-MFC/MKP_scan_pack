@@ -72,6 +72,8 @@ if "show_duplicate_tracking_error" not in st.session_state:
     st.session_state.show_duplicate_tracking_error = False 
 if "last_scanned_tracking" not in st.session_state:
     st.session_state.last_scanned_tracking = "" 
+if "scanner_key" not in st.session_state:
+    st.session_state.scanner_key = "scanner_v1"
 
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
 
@@ -90,11 +92,8 @@ def clear_all_and_restart():
     st.session_state.staged_scans = []
     st.session_state.show_duplicate_tracking_error = False
     st.session_state.last_scanned_tracking = ""
-    # ไม่ต้องมี st.rerun() เพราะ on_click จะทำเอง
-
-# ❌ (ลบ) ฟังก์ชันนี้ไม่ได้ใช้งานแล้ว
-# def clear_barcode_and_staging(): ...
-
+    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}"
+    
 def save_all_to_db():
     """บันทึก Staging list ทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
@@ -151,11 +150,10 @@ with tab1:
     # --- ส่วนที่ 1: กล้องสแกน และ ข้อความแนะนำ (Dynamic) ---
     
     # สร้าง st.empty() เพื่อจองพื้นที่สำหรับข้อความแนะนำ
-    # เราจะอัปเดตข้อความนี้ตามสถานะของแอป
     scanner_prompt_placeholder = st.empty() 
     
-    # เรียกกล้องสแกน (จะอยู่ที่นี่ที่เดียว)
-    scan_value = qrcode_scanner(key="main_scanner")
+    # --- 🟢 (แก้ไข) เปลี่ยน key เป็น dynamic ---
+    scan_value = qrcode_scanner(key=st.session_state.scanner_key)
 
     # --- ส่วนที่ 2: Logic ประมวลผลการสแกน ---
     # (ย้าย Logic การประมวลผลมาไว้ตรงนี้)
