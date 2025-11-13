@@ -128,13 +128,19 @@ def save_all_to_db():
         # เคลียร์ค่าหลังจากบันทึกสำเร็จ
         saved_count = len(st.session_state.staged_scans)
         st.session_state.scan_count += saved_count # เพิ่มยอดสะสม
+
+        # --- 🟢 (แก้ไข) เคลียร์ค่าทั้งหมด ---
         st.session_state.staged_scans = []
-        st.session_state.temp_barcode = "" # (สำคัญ) ล้าง Barcode เพื่อเริ่มรอบใหม่
+        st.session_state.temp_barcode = "" 
         st.session_state.show_duplicate_tracking_error = False
         st.session_state.last_scanned_tracking = ""
+        st.session_state.current_user = "" # <-- 🟢 (แก้ไข) เพิ่มบรรทัดนี้เพื่อล้างค่า User
+        # --- 🟢 สิ้นสุด 🟢 ---
         
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
-        st.rerun() 
+        
+        # ❌ (แก้ไข) ลบ st.rerun() ออก เพราะ on_click จะ Rerun ให้อัตโนมัติ
+        # st.rerun() 
         
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
