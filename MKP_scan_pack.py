@@ -22,17 +22,17 @@ h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
 /* --- 🟢 (แก้ไข) เลือก h3 (subheader) ให้เฉพาะเจาะจงขึ้น --- */
 /* (เลือก h3 ที่อยู่ใน Columns ที่เราจะจัด layout เท่านั้น) */
 div[data-testid="stTabs-panel-0"] > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] h3 { 
-    font-size: 1.0rem !important; 
-    margin-top: 1rem; 
+    font-size: 0.5rem !important; 
+    margin-top: 0.25rem; 
     margin-bottom: 0.5rem; 
 }
 
 /* 3. Metric (เหมือนเดิม) */
 [data-testid="stMetric"] {
     padding-top: 0 !important; background-color: #FAFAFA;
-    border-radius: 0.5rem; padding: 0.5rem 1rem !important;
+    border-radius: 0.25rem; padding: 0.25rem 1rem !important;
 }
-[data-testid="stMetricValue"] { font-size: 1.8rem !important; }
+[data-testid="stMetricValue"] { font-size: 0.9rem !important; }
 [data-testid="stMetricLabel"] { font-size: 0.9rem !important; }
 
 /* 4. Staging Card Container (เหมือนเดิม) */
