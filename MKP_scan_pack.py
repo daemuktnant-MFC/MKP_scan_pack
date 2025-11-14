@@ -105,6 +105,8 @@ def clear_all_and_restart():
     st.session_state.last_scan_processed = ""
     st.session_state.show_user_not_found_error = False
     st.session_state.last_failed_user_scan = ""
+    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}"
+    st.session_state.last_scan_processed = ""
     # --- 🟢 สิ้นสุด 🟢 ---
 
 def save_all_to_db():
@@ -181,7 +183,7 @@ def validate_and_lock_user(user_id_to_check):
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (เพิ่มปุ่มคีย์ Manual) ---
+# --- TAB 1: หน้าสแกน (เพิ่มปุ่มเคลียร์ Error) ---
 with tab1:
     st.header("บันทึกการสแกน") 
 
@@ -189,8 +191,8 @@ with tab1:
     scanner_prompt_placeholder = st.empty() 
     scan_value = qrcode_scanner(key=st.session_state.scanner_key)
 
-    # --- (ใหม่) เพิ่มส่วนการคีย์ Manual ใต้กล้อง ---
-    if not st.session_state.current_user: # แสดงเฉพาะเมื่อยังไม่มี User
+    # --- (ส่วนการคีย์ Manual - เหมือนเดิม) ---
+    if not st.session_state.current_user: 
         with st.expander("คีย์ User ID (กรณีสแกนไม่ได้)"):
             with st.form(key="manual_user_form"):
                 manual_user_id = st.text_input("ป้อน User ID:")
@@ -198,38 +200,34 @@ with tab1:
 
             if manual_user_submit:
                 if manual_user_id:
-                    # เรียกใช้ฟังก์ชันตรวจสอบเดียวกัน
                     if validate_and_lock_user(manual_user_id):
                         st.session_state.last_scan_processed = manual_user_id 
-                        st.rerun() # Rerun เพื่ออัปเดตหน้าจอ
+                        st.rerun() 
                 else:
                     st.warning("กรุณาป้อน User ID")
-    # --- (สิ้นสุดส่วน Manual) ---
 
-    # --- ส่วนที่ 2: Logic ประมวลผลการสแกน ---
+    # --- ส่วนที่ 2: Logic ประมวลผลการสแกน (เหมือนเดิม) ---
     is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
     
     if is_new_scan:
         st.session_state.last_scan_processed = scan_value 
         
-        # --- 2A: State 1: ยังไม่มี User ---
+        # 2A: State 1: ยังไม่มี User
         if not st.session_state.current_user:
-            # --- 🟢 (แก้ไข) เรียกใช้ฟังก์ชันใหม่ ---
             validate_and_lock_user(scan_value)
-            # --- 🟢 (สิ้นสุดการแก้ไข) ---
 
-        # --- 2B: State 2: มี User, ไม่มี Barcode ---
+        # 2B: State 2: มี User, ไม่มี Barcode
         elif not st.session_state.temp_barcode:
-            st.session_state.show_user_not_found_error = False # ล้าง Error user เก่า
+            st.session_state.show_user_not_found_error = False 
             if scan_value == st.session_state.current_user:
                 st.warning("⚠️ นั่นคือ User! กรุณาสแกน Barcode สินค้า", icon="⚠️")
             else:
                 st.session_state.temp_barcode = scan_value
                 st.success(f"Barcode: {scan_value} ถูกล็อคแล้ว")
 
-        # --- 2C: State 3: มี User และ Barcode (พร้อมสแกน Tracking) ---
+        # 2C: State 3: มี User และ Barcode
         else:
-            st.session_state.show_user_not_found_error = False # ล้าง Error user เก่า
+            st.session_state.show_user_not_found_error = False 
             if scan_value == st.session_state.temp_barcode:
                 st.warning("⚠️ นั่นคือ Barcode เดิม! กรุณาสแกน Tracking Number", icon="⚠️")
                 st.session_state.show_duplicate_tracking_error = False
@@ -248,7 +246,11 @@ with tab1:
                 st.session_state.show_duplicate_tracking_error = False
                 st.success(f"เพิ่ม Tracking: {scan_value} สำเร็จ!")
 
-    # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ (Dynamic) ---
+    # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ และ "ปุ่มเคลียร์" ---
+    
+    # (ตรวจสอบว่ามี Error ค้างหรือไม่)
+    has_sticky_error = st.session_state.show_user_not_found_error or st.session_state.show_duplicate_tracking_error
+
     if not st.session_state.current_user:
         if st.session_state.show_user_not_found_error:
             scanner_prompt_placeholder.error(f"⚠️ ไม่พบ User '{st.session_state.last_failed_user_scan}' ในระบบ! กรุณาสแกน User หรือคีย์ User ที่ถูกต้อง", icon="⚠️")
@@ -262,6 +264,14 @@ with tab1:
             scanner_prompt_placeholder.error(f"⚠️ สแกนซ้ำ! '{st.session_state.last_scanned_tracking}' มีในรายการแล้ว กรุณาสแกน Tracking ถัดไป...", icon="⚠️")
         else:
             scanner_prompt_placeholder.info("ขั้นตอนที่ 3: สแกน Tracking Number ทีละกล่อง...")
+
+    # --- 🟢 (ใหม่) เพิ่มปุ่มเคลียร์ Error ---
+    if has_sticky_error:
+        st.button("❌ ปิดแจ้งเตือน (และสแกนใหม่)", 
+                  on_click=acknowledge_error_and_reset_scanner, 
+                  use_container_width=True,
+                  type="primary") # (ใช้สีแดงให้เด่น)
+    # --- 🟢 (สิ้นสุด) ---
 
     # --- ส่วนที่ 4: แสดงผล (Display Area) ---
     st.divider()
