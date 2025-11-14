@@ -105,21 +105,22 @@ def clear_all_and_restart():
     st.session_state.last_scan_processed = ""
     st.session_state.show_user_not_found_error = False
     st.session_state.last_failed_user_scan = ""
+
+# --- 🟢 (ใหม่) เพิ่มฟังก์ชันที่หายไป ---
+def acknowledge_error_and_reset_scanner():
+    """(ใหม่) เคลียร์ Error (User/Tracking ซ้ำ) และรีเซ็ตกล้อง"""
+    # ล้างธง Error ทั้งหมด
+    st.session_state.show_user_not_found_error = False
+    st.session_state.last_failed_user_scan = ""
+    st.session_state.show_duplicate_tracking_error = False
+    st.session_state.last_scanned_tracking = ""
+    
+    # (สำคัญ) รีเซ็ตกล้องเพื่อล้างค่าที่ "ค้าง"
     st.session_state.scanner_key = f"scanner_{uuid.uuid4()}"
     st.session_state.last_scan_processed = ""
-    # --- 🟢 สิ้นสุด 🟢 ---
+# --- 🟢 (สิ้นสุด) ---
 
-def save_all_to_db():
-    """บันทึก Staging list ทั้งหมดลง Database"""
-    if not st.session_state.staged_scans:
-        st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
-        return
-    if not st.session_state.current_user:
-         st.error("ไม่พบชื่อผู้ใช้งาน! กรุณาป้อนชื่อผู้ใช้งาน")
-         return
-    if not st.session_state.temp_barcode:
-         st.error("ไม่พบ Barcode! (เกิดข้อผิดพลาด) กรุณาล้างและสแกนใหม่")
-         return
+# --- 🟢 (แก้ไข) ย้ายฟังก์ชันนี้ออกมาให้อยู่ระดับบนสุด ---
 def validate_and_lock_user(user_id_to_check):
     """(ใหม่) ตรวจสอบ User ID กับ DB และล็อคค่าถ้าถูกต้อง"""
     if not user_id_to_check:
@@ -147,7 +148,21 @@ def validate_and_lock_user(user_id_to_check):
         st.error(f"เกิดข้อผิดพลาดในการตรวจสอบ User: {e}")
         st.session_state.show_user_not_found_error = False 
         return False
-         
+
+# --- 🟢 (แก้ไข) แก้ไขโครงสร้างฟังก์ชัน save_all_to_db ---
+def save_all_to_db():
+    """บันทึก Staging list ทั้งหมดลง Database"""
+    if not st.session_state.staged_scans:
+        st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
+        return
+    if not st.session_state.current_user:
+         st.error("ไม่พบชื่อผู้ใช้งาน! กรุณาป้อนชื่อผู้ใช้งาน")
+         return
+    if not st.session_state.temp_barcode:
+         st.error("ไม่พบ Barcode! (เกิดข้อผิดพลาด) กรุณาล้างและสแกนใหม่")
+         return
+    
+    # (ย้าย Logic การบันทึกมาไว้ใน try...except ที่ถูกต้อง)
     try:
         data_to_insert = []
         THAI_TZ = pytz.timezone("Asia/Bangkok")
@@ -174,7 +189,7 @@ def validate_and_lock_user(user_id_to_check):
         
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
         
-        # เรียกใช้ฟังก์ชันล้างค่า (ซึ่งจะล้าง last_scan_processed ด้วย)
+        # เรียกใช้ฟังก์ชันล้างค่า
         clear_all_and_restart()
         
     except Exception as e:
