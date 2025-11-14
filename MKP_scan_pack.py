@@ -118,7 +118,7 @@ def save_all_to_db():
     if not st.session_state.temp_barcode:
          st.error("ไม่พบ Barcode! (เกิดข้อผิดพลาด) กรุณาล้างและสแกนใหม่")
          return
-    def validate_and_lock_user(user_id_to_check):
+def validate_and_lock_user(user_id_to_check):
     """(ใหม่) ตรวจสอบ User ID กับ DB และล็อคค่าถ้าถูกต้อง"""
     if not user_id_to_check:
         return False
