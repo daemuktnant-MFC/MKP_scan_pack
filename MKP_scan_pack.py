@@ -8,7 +8,7 @@ import pytz
 from sqlalchemy import text
 import numpy as np
 
-# --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
+# --- (CSS สำหรับ Mobile Layout - อัปเดต) ---
 st.markdown("""
 <style>
 /* 1. Base Layout (เหมือนเดิม) */
@@ -19,9 +19,13 @@ div.block-container {
 /* 2. Headers (เหมือนเดิม) */
 h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
 
-/* --- 🟢 (แก้ไข) ลดขนาด h3 --- */
-h3 { font-size: 1.0rem !important; margin-top: 1rem; margin-bottom: 0.5rem; }
-/* --- 🟢 (สิ้นสุด) --- */
+/* (แก้ไข) เลือก h3 (subheader) ให้เฉพาะเจาะจงขึ้น */
+/* (เพื่อให้หัวข้อ "1. ผู้ใช้งาน" และ "2. Barcode" เล็กลง) */
+div[data-testid="stVerticalBlock"] h3 { 
+    font-size: 1.0rem !important; 
+    margin-top: 1rem; 
+    margin-bottom: 0.5rem; 
+}
 
 /* 3. Metric (เหมือนเดิม) */
 [data-testid="stMetric"] {
@@ -31,23 +35,33 @@ h3 { font-size: 1.0rem !important; margin-top: 1rem; margin-bottom: 0.5rem; }
 [data-testid="stMetricValue"] { font-size: 1.8rem !important; }
 [data-testid="stMetricLabel"] { font-size: 0.9rem !important; }
 
-/* 4. Staging Card Container (กรอบของแต่ละรายการ) */
+/* 4. Staging Card Container (เหมือนเดิม) */
 [data-testid="stVerticalBlock"] > [data-testid="stContainer"] {
     border: 1px solid #BBBBBB !important; 
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem !important; 
     margin-bottom: 0.5rem; 
 }
-/* 5. Code Box (Tracking/Barcode) ในการ์ด */
+/* 5. Code Box (เหมือนเดิม) */
 .stCode { 
     font-size: 0.75rem !important; 
     padding: 0.4em !important; 
 }
-/* 6. ปุ่ม "ลบ" (❌) ในการ์ด */
+/* 6. ปุ่ม "ลบ" (เหมือนเดิม) */
 div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
     font-size: 0.8rem !important; 
     padding: 0.4em 0.5em !important; 
     height: 2.8em !important; 
+}
+
+/* --- 🟢 (ใหม่) 7. บังคับ Columns ให้อยู่ข้างกันบนมือถือ --- */
+@media (max-width: 640px) {
+    /* เลือก container ของ st.columns */
+    div[data-testid="stHorizontalBlock"] {
+        /* บังคับให้เป็น 2 Columns (1fr 1fr) เสมอ */
+        grid-template-columns: 1fr 1fr !important; 
+        gap: 0.75rem !important; /* เพิ่มช่องว่างระหว่าง Column */
+    }
 }
 </style>
 """, unsafe_allow_html=True)
