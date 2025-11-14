@@ -502,8 +502,8 @@ with tab2:
             st.error("วันที่เริ่มต้น (From) ต้องมาก่อนวันที่สิ้นสุด (To)")
             show_error = True 
 
-    st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
-    st.divider()
+    #st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
+    #st.divider()
 
     try:
         query = "SELECT * FROM scans" 
