@@ -5,6 +5,7 @@ from streamlit.connections import SQLConnection
 from streamlit_qrcode_scanner import qrcode_scanner
 import uuid
 import pytz
+from sqlalchemy import text
 
 # --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
 st.markdown("""
@@ -291,17 +292,16 @@ with tab1:
                                   use_container_width=True
                                  )
 
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เพิ่ม Form Add User) ---
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Error session.execute) ---
 with tab2:
     st.header("ค้นหาและดาวน์โหลดข้อมูล")
     
-    # --- 🟢 (ใหม่) ส่วนที่ 1: Form สำหรับเพิ่ม User ---
+    # --- ส่วนที่ 1: Form สำหรับเพิ่ม User ---
     st.subheader("เพิ่ม User ใหม่")
     with st.expander("คลิกเพื่อเปิดฟอร์มเพิ่ม User", expanded=False):
         with st.form(key="add_user_form", clear_on_submit=True):
             st.info("ป้อนข้อมูล User ใหม่ (ต้องป้อน User ID)")
             
-            # (ใช้ชื่อคอลัมน์จากรูป image_42a3ae.png)
             new_user_id = st.text_input("User ID (จำเป็น)")
             new_emp_name = st.text_input("Employee Name (ชื่อจริง)")
             new_emp_surname = st.text_input("Employee Surname (นามสกุล)")
@@ -322,7 +322,6 @@ with tab2:
                             st.error(f"⚠️ User ID '{new_user_id}' นี้มีในระบบแล้ว! ไม่สามารถเพิ่มซ้ำได้")
                         else:
                             # 2. ถ้าไม่ซ้ำ ให้ Insert ข้อมูล
-                            # (เราจะใช้ SQL INSERT โดยตรงแทน .to_sql เพื่อความแม่นยำ)
                             insert_query = """
                             INSERT INTO user_data (user_id, "Employee_Name", "Employee_Surname")
                             VALUES (:user_id, :name, :surname)
@@ -333,21 +332,20 @@ with tab2:
                                 "surname": new_emp_surname
                             }
                             
-                            # (หมายเหตุ: ต้องใช้ "" ครอบชื่อคอลัมน์ที่เป็นตัวพิมพ์ใหญ่/เล็กผสมกัน)
-                            
                             with supabase_conn.session as session:
-                                session.execute(insert_query, insert_params)
+                                # --- 🟢 (แก้ไข) หุ้ม query ด้วย text() ---
+                                session.execute(text(insert_query), insert_params)
+                                # --- 🟢 สิ้นสุด 🟢 ---
                                 session.commit()
                             
                             st.success(f"บันทึก User '{new_user_id}' ลงในระบบสำเร็จ!")
-                            # (Cache ของ query user จะถูกล้างใน 60 วิ)
                             
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาดในการบันทึก User: {e}")
-    # --- 🟢 (สิ้นสุด Form) ---
+    # --- (สิ้นสุด Form) ---
 
 
-    st.divider() # คั่นระหว่างส่วน Add User และส่วน Filter
+    st.divider() 
     
     st.header("ค้นหาข้อมูลที่สแกนแล้ว")
     
@@ -373,7 +371,7 @@ with tab2:
     st.divider()
 
     try:
-        query = "SELECT * FROM scans" # (Query ตาราง scans เหมือนเดิม)
+        query = "SELECT * FROM scans" 
         filters = []
         params = {}
         if filter_user:
