@@ -338,7 +338,7 @@ with tab1:
                                   use_container_width=True
                                  )
 
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เพิ่ม JOIN ดึงชื่อ) ---
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Format CSV) ---
 with tab2:
     st.header("จัดการข้อมูล User")
 
@@ -491,10 +491,8 @@ with tab2:
     st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
     st.divider()
 
-    # --- 🟢 (แก้ไข) อัปเดต Query ทั้งหมด ---
     try:
-        # 1. เปลี่ยน SELECT * เป็นการ SELECT แบบเจาะจง
-        #    และใช้ CONCAT_WS เพื่อรวมชื่อ-นามสกุล
+        # (Query ที่ดึงข้อมูล JOIN - เหมือนเดิม)
         query = """
             SELECT 
                 s.id, 
@@ -512,13 +510,11 @@ with tab2:
         filters = []
         params = {}
         
-        # 2. อัปเดต Filter ให้ใช้ 's.user_id' (เพราะเราใช้ Alias 's')
         if filter_user:
             filters.append("s.user_id = :user")
             params["user"] = filter_user
         
         if not show_error: 
-            # 3. อัปเดต Filter วันที่ ให้ใช้ 's.created_at'
             if start_date and end_date:
                 filters.append("DATE(s.created_at AT TIME ZONE 'Asia/Bangkok') BETWEEN :start AND :end")
                 params["start"] = start_date
@@ -533,7 +529,6 @@ with tab2:
         if filters:
             query += " WHERE " + " AND ".join(filters)
         
-        # 4. อัปเดต ORDER BY ให้ใช้ 's.created_at'
         query += " ORDER BY s.created_at DESC"
         
         if show_error:
@@ -542,13 +537,28 @@ with tab2:
             data_df = supabase_conn.query(query, params=params)
         
         if not data_df.empty:
+            # 1. แสดงผลบนหน้าจอ (ใช้ข้อมูลดิบ)
             st.dataframe(data_df, use_container_width=True)
             
+            # --- 🟢 (START EDIT) ---
+            # 2. สร้าง DataFrame "สำหรับดาวน์โหลด"
+            df_for_csv = data_df.copy()
+            
+            # 3. แก้ไข Format วันที่
+            # (แปลงเป็น datetime object ก่อน แล้วค่อย format)
+            df_for_csv['created_at'] = pd.to_datetime(df_for_csv['created_at']).dt.strftime('%d-%m-%Y %H:%M')
+            
+            # 4. แก้ไข Barcode (บังคับให้ Excel แสดงเป็น Text)
+            # (ใส่ ="..." เพื่อให้ Excel รู้ว่าเป็น String)
+            df_for_csv['product_barcode'] = df_for_csv['product_barcode'].apply(lambda x: f'="{x}"' if pd.notna(x) and x != "" else "")
+            # --- 🟢 (END EDIT) ---
+
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
                 return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             
-            csv_data = convert_df_to_csv(data_df)
+            # 5. ส่ง DataFrame ที่แปลงค่าแล้ว ไปสร้าง CSV
+            csv_data = convert_df_to_csv(df_for_csv)
             
             st.download_button(
                 label="📥 Download ข้อมูลเป็น CSV",
