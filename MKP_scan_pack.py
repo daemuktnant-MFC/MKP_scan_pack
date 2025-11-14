@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-# import io  <- ลบออก
 from datetime import datetime
 from streamlit.connections import SQLConnection
 from streamlit_qrcode_scanner import qrcode_scanner
@@ -75,6 +74,11 @@ if "last_scanned_tracking" not in st.session_state:
 if "scanner_key" not in st.session_state:
     st.session_state.scanner_key = "scanner_v1"
 
+# --- 🟢 (แก้ไข) เพิ่ม state สำหรับ Logic แก้ไขค่าค้าง ---
+if "last_scan_processed" not in st.session_state:
+    st.session_state.last_scan_processed = ""
+# --- 🟢 สิ้นสุด 🟢 ---
+
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
 
 def delete_item(item_id_to_delete):
@@ -84,16 +88,19 @@ def delete_item(item_id_to_delete):
         if item["id"] != item_id_to_delete
     ]
 
-# 🟢 (แก้ไข) ย้ายฟังก์ชันนี้ออกมาอยู่ข้างนอก
 def clear_all_and_restart():
-    """(ใหม่) ล้างทุกอย่างและเริ่มใหม่ทั้งหมด (User, Barcode, Staging)"""
+    """ล้างทุกอย่างและเริ่มใหม่ทั้งหมด (User, Barcode, Staging)"""
     st.session_state.current_user = ""
     st.session_state.temp_barcode = ""
     st.session_state.staged_scans = []
     st.session_state.show_duplicate_tracking_error = False
     st.session_state.last_scanned_tracking = ""
-    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}"
+    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}" # บังคับสร้างกล้องใหม่
     
+    # --- 🟢 (แก้ไข) ล้างค่าที่ประมวลผลล่าสุด ---
+    st.session_state.last_scan_processed = ""
+    # --- 🟢 สิ้นสุด 🟢 ---
+
 def save_all_to_db():
     """บันทึก Staging list ทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
@@ -129,13 +136,11 @@ def save_all_to_db():
         
         saved_count = len(st.session_state.staged_scans)
         st.session_state.scan_count += saved_count 
-
-        # --- 🟢 (แก้ไข) เรียกใช้ฟังก์ชันล้างค่า ---
-        clear_all_and_restart()
-        # --- 🟢 สิ้นสุด 🟢 ---
         
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
-        # ❌ (ลบ) st.rerun() ที่ไม่จำเป็นออก
+        
+        # เรียกใช้ฟังก์ชันล้างค่า (ซึ่งจะล้าง last_scan_processed ด้วย)
+        clear_all_and_restart()
         
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
@@ -143,27 +148,29 @@ def save_all_to_db():
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (ย้ายกล้องขึ้นบนสุด) ---
+# --- TAB 1: หน้าสแกน (แก้ไข Logic การประมวลผล) ---
 with tab1:
-    #st.header("บันทึกการสแกน") 
+    st.header("บันทึกการสแกน") 
 
     # --- ส่วนที่ 1: กล้องสแกน และ ข้อความแนะนำ (Dynamic) ---
-    
-    # สร้าง st.empty() เพื่อจองพื้นที่สำหรับข้อความแนะนำ
     scanner_prompt_placeholder = st.empty() 
-    
-    # --- 🟢 (แก้ไข) เปลี่ยน key เป็น dynamic ---
     scan_value = qrcode_scanner(key=st.session_state.scanner_key)
 
     # --- ส่วนที่ 2: Logic ประมวลผลการสแกน ---
-    # (ย้าย Logic การประมวลผลมาไว้ตรงนี้)
-    if scan_value:
-        # --- 2A: State 1: ยังไม่มี User (กำลังรอสแกน User) ---
+    
+    # --- 🟢 (แก้ไข) ตรวจสอบว่านี่คือการสแกนใหม่ (ค่าไม่ซ้ำกับที่เพิ่งประมวลผล) ---
+    is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
+    
+    if is_new_scan:
+        # ถ้าเป็นการสแกนใหม่ ให้ประมวลผล
+        st.session_state.last_scan_processed = scan_value # Mark as processed
+        
+        # --- 2A: State 1: ยังไม่มี User ---
         if not st.session_state.current_user:
             st.session_state.current_user = scan_value
             st.success(f"User: {scan_value} ถูกล็อคแล้ว")
 
-        # --- 2B: State 2: มี User, ไม่มี Barcode (กำลังรอสแกน Barcode) ---
+        # --- 2B: State 2: มี User, ไม่มี Barcode ---
         elif not st.session_state.temp_barcode:
             if scan_value == st.session_state.current_user:
                 st.warning("⚠️ นั่นคือ User! กรุณาสแกน Barcode สินค้า", icon="⚠️")
@@ -171,7 +178,7 @@ with tab1:
                 st.session_state.temp_barcode = scan_value
                 st.success(f"Barcode: {scan_value} ถูกล็อคแล้ว")
 
-        # --- 2C: State 3: มี User และ Barcode (กำลังรอสแกน Tracking) ---
+        # --- 2C: State 3: มี User และ Barcode (พร้อมสแกน Tracking) ---
         else:
             if scan_value == st.session_state.temp_barcode:
                 st.warning("⚠️ นั่นคือ Barcode เดิม! กรุณาสแกน Tracking Number", icon="⚠️")
@@ -179,9 +186,13 @@ with tab1:
             elif scan_value == st.session_state.current_user:
                 st.warning("⚠️ นั่นคือ User! กรุณาสแกน Tracking Number", icon="⚠️")
                 st.session_state.show_duplicate_tracking_error = False
+            
+            # --- 🟢 (แก้ไข) นี่คือ Logic การตรวจซ้ำ ที่จะทำงานแค่ครั้งเดียว ---
             elif any(item["tracking"] == scan_value for item in st.session_state.staged_scans):
                 st.session_state.show_duplicate_tracking_error = True
                 st.session_state.last_scanned_tracking = scan_value 
+            
+            # --- 🟢 (แก้ไข) นี่คือ Logic การเพิ่ม ที่จะทำงานแค่ครั้งเดียว ---
             else:
                 st.session_state.staged_scans.append({
                     "id": str(uuid.uuid4()),
@@ -190,10 +201,11 @@ with tab1:
                 })
                 st.session_state.show_duplicate_tracking_error = False
                 st.success(f"เพิ่ม Tracking: {scan_value} สำเร็จ!")
+    
+    # --- 🟢 (สิ้นสุดการแก้ไข) ---
 
     # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ (Dynamic) ---
-    # (ต้องอยู่หลัง Logic การประมวลผล เพื่อให้ข้อความอัปเดตทันที)
-    
+    # (ส่วนนี้ทำงานทุก Rerun ซึ่งถูกต้อง)
     if not st.session_state.current_user:
         scanner_prompt_placeholder.info("ขั้นตอนที่ 1: สแกน 'ชื่อผู้ใช้งาน'...")
     elif not st.session_state.temp_barcode:
@@ -201,6 +213,7 @@ with tab1:
     else:
         # State 3: กำลังสแกน Tracking
         if st.session_state.show_duplicate_tracking_error:
+            # (ข้อความนี้จะค้างแสดง จนกว่าจะสแกนอันใหม่ที่ไม่ซ้ำ)
             scanner_prompt_placeholder.error(f"⚠️ สแกนซ้ำ! '{st.session_state.last_scanned_tracking}' มีในรายการแล้ว กรุณาสแกน Tracking ถัดไป...", icon="⚠️")
         else:
             scanner_prompt_placeholder.info("ขั้นตอนที่ 3: สแกน Tracking Number ทีละกล่อง...")
@@ -215,7 +228,6 @@ with tab1:
     else:
         st.info("...รอล็อค User...")
     
-    # (แสดงข้อมูล Barcode และอื่นๆ ต่อเมื่อมี User แล้ว)
     if st.session_state.current_user:
         st.divider()
         st.subheader("2. Barcode ที่ล็อคอยู่")
@@ -260,31 +272,27 @@ with tab1:
                                   use_container_width=True
                                  )
 
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข From-To) ---
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (อัปเดต From-To) ---
 with tab2:
     st.header("ค้นหาและดาวน์โหลดข้อมูล")
     
-    show_error = False # (ใหม่) สร้างธงสำหรับ Error
+    show_error = False 
     
     with st.expander("ตัวกรองข้อมูล (Filter)", expanded=True):
         col_f1, col_col2 = st.columns(2)
         with col_f1:
             filter_user = st.text_input("กรองตาม User (เว้นว่างเพื่อแสดงทั้งหมด)")
         
-        # --- 🟢 (แก้ไข) เปลี่ยนเป็น From-To ---
         with col_col2:
-            # (ใหม่) แบ่ง 2 คอลัมน์ย่อยสำหรับ From/To
             sub_col1, sub_col2 = st.columns(2)
             with sub_col1:
                 start_date = st.date_input("From (จากวันที่)", value=None)
             with sub_col2:
                 end_date = st.date_input("To (ถึงวันที่)", value=None)
-        # --- 🟢 สิ้นสุด 🟢 ---
         
-        # (ใหม่) ตรวจสอบ Error ของวันที่
         if start_date and end_date and start_date > end_date:
             st.error("วันที่เริ่มต้น (From) ต้องมาก่อนวันที่สิ้นสุด (To)")
-            show_error = True # ตั้งธง Error
+            show_error = True 
 
     st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
     st.divider()
@@ -297,8 +305,7 @@ with tab2:
             filters.append("user_id = :user")
             params["user"] = filter_user
         
-        # --- 🟢 (แก้ไข) Logic การกรองวันที่ ---
-        if not show_error: # ถ้าไม่มี Error เรื่องวันที่ ให้เพิ่ม filter
+        if not show_error: 
             if start_date and end_date:
                 filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') BETWEEN :start AND :end")
                 params["start"] = start_date
@@ -309,16 +316,14 @@ with tab2:
             elif end_date:
                 filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') <= :end")
                 params["end"] = end_date
-        # --- 🟢 สิ้นสุด 🟢 ---
             
         if filters:
             query += " WHERE " + " AND ".join(filters)
         
         query += " ORDER BY created_at DESC"
         
-        # (ใหม่) ถ้ามี Error ให้ข้ามการ Query
         if show_error:
-            data_df = pd.DataFrame() # สร้าง DataFrame ว่างเปล่า
+            data_df = pd.DataFrame() 
         else:
             data_df = supabase_conn.query(query, params=params)
         
@@ -338,7 +343,6 @@ with tab2:
                 mime="text/csv",
             )
         else:
-            # ถ้ามี Error ให้เงียบไป (เพราะ st.error แสดงไปแล้ว)
             if not show_error:
                 st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
             
