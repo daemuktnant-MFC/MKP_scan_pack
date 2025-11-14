@@ -292,7 +292,7 @@ with tab1:
     col_user, col_barcode = st.columns(2)
     
     with col_user:
-        st.subheader("1.User)")
+        st.subheader("1.User")
         if st.session_state.current_user:
             st.code(st.session_state.current_user)
             # (เพิ่ม use_container_width=True ให้ปุ่มเต็มกล่อง)
