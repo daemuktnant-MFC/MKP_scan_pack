@@ -18,7 +18,11 @@ div.block-container {
 }
 /* 2. Headers (เหมือนเดิม) */
 h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
-h3 { font-size: 1.15rem !important; margin-top: 1rem; margin-bottom: 0.5rem; }
+
+/* --- 🟢 (แก้ไข) ลดขนาด h3 --- */
+h3 { font-size: 1.0rem !important; margin-top: 1rem; margin-bottom: 0.5rem; }
+/* --- 🟢 (สิ้นสุด) --- */
+
 /* 3. Metric (เหมือนเดิม) */
 [data-testid="stMetric"] {
     padding-top: 0 !important; background-color: #FAFAFA;
@@ -195,7 +199,7 @@ def save_all_to_db():
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (เพิ่มปุ่มเคลียร์ Error) ---
+# --- TAB 1: หน้าสแกน (ปรับ Layout User/Barcode) ---
 with tab1:
     st.header("บันทึกการสแกน") 
 
@@ -258,9 +262,8 @@ with tab1:
                 st.session_state.show_duplicate_tracking_error = False
                 st.success(f"เพิ่ม Tracking: {scan_value} สำเร็จ!")
 
-    # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ และ "ปุ่มเคลียร์" ---
+    # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ และ "ปุ่มเคลียร์" (เหมือนเดิม) ---
     
-    # (ตรวจสอบว่ามี Error ค้างหรือไม่)
     has_sticky_error = st.session_state.show_user_not_found_error or st.session_state.show_duplicate_tracking_error
 
     if not st.session_state.current_user:
@@ -277,34 +280,43 @@ with tab1:
         else:
             scanner_prompt_placeholder.info("ขั้นตอนที่ 3: สแกน Tracking Number ทีละกล่อง...")
 
-    # --- 🟢 (ใหม่) เพิ่มปุ่มเคลียร์ Error ---
     if has_sticky_error:
         st.button("❌ ปิดแจ้งเตือน (และสแกนใหม่)", 
                   on_click=acknowledge_error_and_reset_scanner, 
                   use_container_width=True,
-                  type="primary") # (ใช้สีแดงให้เด่น)
-    # --- 🟢 (สิ้นสุด) ---
-
-    # --- ส่วนที่ 4: แสดงผล (Display Area) ---
+                  type="primary") 
+                  
+    # --- 🟢 (แก้ไข) ส่วนที่ 4: แสดงผล (Display Area) - ใช้ Columns ---
     st.divider()
-    st.subheader("1. ผู้ใช้งาน (User)")
-    if st.session_state.current_user:
-        st.code(st.session_state.current_user)
-        st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart)
-    else:
-        st.info("...รอล็อค User...")
     
-    if st.session_state.current_user:
-        st.divider()
-        st.subheader("2. Barcode ที่ล็อคอยู่")
-        if st.session_state.temp_barcode:
-            st.code(st.session_state.temp_barcode)
+    col_user, col_barcode = st.columns(2)
+    
+    with col_user:
+        st.subheader("1. ผู้ใช้งาน (User)")
+        if st.session_state.current_user:
+            st.code(st.session_state.current_user)
+            # (เพิ่ม use_container_width=True ให้ปุ่มเต็มกล่อง)
+            st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart, use_container_width=True) 
         else:
-            st.info("...รอล็อค Barcode...")
-        
-        st.divider()
+            st.info("...รอล็อค User...")
+    
+    with col_barcode:
+        st.subheader("2. Barcode ที่ล็อคอยู่")
+        if st.session_state.current_user:
+            if st.session_state.temp_barcode:
+                st.code(st.session_state.temp_barcode)
+            else:
+                st.info("...รอล็อค Barcode...")
+        else:
+            st.info("...รอ User ก่อน...") # (Placeholder เพื่อจัด Layout)
+    # --- 🟢 (สิ้นสุดการแก้ไขส่วนที่ 4) ---
+    
+    
+    # --- ส่วนที่ 5: ปุ่มบันทึก และ รายการที่กำลังสแกน ---
+    # (จะแสดงส่วนนี้ต่อเมื่อมี User แล้ว)
+    if st.session_state.current_user:
+        st.divider() # (ย้าย Divider มาไว้ตรงนี้)
 
-        # --- ส่วนที่ 5: ปุ่มบันทึก และ รายการที่กำลังสแกน ---
         st.button("💾 บันทึกทั้งหมด (และเริ่มใหม่)",
                   type="primary",
                   use_container_width=True,
