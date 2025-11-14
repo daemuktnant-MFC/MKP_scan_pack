@@ -6,6 +6,7 @@ from streamlit_qrcode_scanner import qrcode_scanner
 import uuid
 import pytz
 from sqlalchemy import text
+import numpy as np
 
 # --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
 st.markdown("""
@@ -80,6 +81,8 @@ if "show_user_not_found_error" not in st.session_state:
     st.session_state.show_user_not_found_error = False
 if "last_failed_user_scan" not in st.session_state:
     st.session_state.last_failed_user_scan = ""
+if "selected_user_to_edit" not in st.session_state:
+    st.session_state.selected_user_to_edit = None
 # --- 🟢 สิ้นสุด 🟢 ---
 
 # --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
@@ -291,62 +294,161 @@ with tab1:
                                   args=(item['id'],),
                                   use_container_width=True
                                  )
-
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Error session.execute) ---
+                        
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (อัปเกรด: เพิ่ม/แก้ไข/ลบ User) ---
 with tab2:
-    st.header("ค้นหาและดาวน์โหลดข้อมูล")
-    
-    # --- ส่วนที่ 1: Form สำหรับเพิ่ม User ---
-    st.subheader("เพิ่ม User ใหม่")
-    with st.expander("คลิกเพื่อเปิดฟอร์มเพิ่ม User", expanded=False):
-        with st.form(key="add_user_form", clear_on_submit=True):
-            st.info("ป้อนข้อมูล User ใหม่ (ต้องป้อน User ID)")
-            
-            new_user_id = st.text_input("User ID (จำเป็น)")
-            new_emp_name = st.text_input("Employee Name (ชื่อจริง)")
-            new_emp_surname = st.text_input("Employee Surname (นามสกุล)")
-            
-            submitted = st.form_submit_button("💾 บันทึก User ใหม่")
+    st.header("จัดการข้อมูล User")
 
-            if submitted:
-                if not new_user_id:
+    # --- (ใหม่) ดึงข้อมูล User ทั้งหมดสำหรับ Dropdown ---
+    @st.cache_data(ttl=60) # Cache 1 นาที
+    def get_all_users():
+        try:
+            query = 'SELECT user_id, "Employee_Name", "Employee_Surname" FROM user_data ORDER BY user_id'
+            df = supabase_conn.query(query)
+            return df
+        except Exception as e:
+            st.error(f"ไม่สามารถดึงข้อมูล User: {e}")
+            return pd.DataFrame(columns=["user_id", "Employee_Name", "Employee_Surname"])
+
+    user_df = get_all_users()
+    
+    # (จำเป็น) แปลงค่า None/NaN เป็น String ว่าง เพื่อให้ st.text_input ทำงานได้
+    user_df["Employee_Name"] = user_df["Employee_Name"].fillna("").astype(str)
+    user_df["Employee_Surname"] = user_df["Employee_Surname"].fillna("").astype(str)
+    
+    # สร้าง List สำหรับ Dropdown (เพิ่ม "Add New User" ไว้บนสุด)
+    user_id_list = ["(เลือก User เพื่อ แก้ไข/ลบ)", "--- เพิ่ม User ใหม่ ---"] + user_df["user_id"].tolist()
+
+    # --- (ใหม่) ฟังก์ชันสำหรับปุ่ม "New" (ล้างฟอร์ม) ---
+    def clear_user_form():
+        st.session_state.selected_user_to_edit = "(เลือก User เพื่อ แก้ไข/ลบ)"
+        st.session_state.user_id_input = ""
+        st.session_state.emp_name_input = ""
+        st.session_state.emp_surname_input = ""
+
+    # --- (ใหม่) ฟังก์ชันสำหรับอัปเดต Form เมื่อ Dropdown เปลี่ยน ---
+    def on_user_select():
+        selected_id = st.session_state.selected_user_to_edit
+        
+        if selected_id == "--- เพิ่ม User ใหม่ ---":
+            # โหมด "เพิ่มใหม่"
+            st.session_state.user_id_input = ""
+            st.session_state.emp_name_input = ""
+            st.session_state.emp_surname_input = ""
+        elif selected_id != "(เลือก User เพื่อ แก้ไข/ลบ)":
+            # โหมด "แก้ไข/ลบ" (ดึงข้อมูลมาใส่ Form)
+            user_data = user_df[user_df["user_id"] == selected_id].iloc[0]
+            st.session_state.user_id_input = user_data["user_id"]
+            st.session_state.emp_name_input = user_data["Employee_Name"]
+            st.session_state.emp_surname_input = user_data["Employee_Surname"]
+        else:
+            # โหมด "ว่าง"
+            clear_user_form()
+
+    # --- (ใหม่) UI ส่วนที่ 1: Form จัดการ User ---
+    with st.expander("คลิกเพื่อเปิดฟอร์ม จัดการ User", expanded=True):
+        
+        # 1. Dropdown สำหรับเลือก User
+        st.selectbox(
+            "เลือก User (เพื่อ แก้ไข/ลบ) หรือเลือก 'เพิ่ม User ใหม่'",
+            options=user_id_list,
+            key="selected_user_to_edit",
+            on_change=on_user_select
+        )
+
+        # 2. Form สำหรับป้อนข้อมูล
+        with st.form(key="user_management_form"):
+            
+            # (ตรวจสอบว่าอยู่ในโหมด "เพิ่มใหม่" หรือ "แก้ไข")
+            is_new_mode = st.session_state.selected_user_to_edit == "--- เพิ่ม User ใหม่ ---"
+            
+            # (ช่อง User ID: ถ้าโหมด "แก้ไข" จะ Read-only)
+            user_id = st.text_input("User ID (จำเป็น)", key="user_id_input", disabled=(not is_new_mode))
+            emp_name = st.text_input("Employee Name (ชื่อจริง)", key="emp_name_input")
+            emp_surname = st.text_input("Employee Surname (นามสกุล)", key="emp_surname_input")
+
+            # 3. แถวของปุ่ม (สร้างใหม่, แก้ไข, ลบ)
+            col_b1, col_b2, col_b3 = st.columns([2, 2, 1])
+
+            with col_b1:
+                # ปุ่ม "บันทึก" (จะทำงานเป็น "สร้าง" หรือ "แก้ไข" ขึ้นอยู่กับโหมด)
+                save_label = "💾 บันทึก User ใหม่" if is_new_mode else "💾 อัปเดต User"
+                save_button = st.form_submit_button(save_label, use_container_width=True)
+            
+            with col_b2:
+                # ปุ่ม "ลบ" (จะถูก Disable ถ้าอยู่ในโหมด "เพิ่มใหม่")
+                delete_button = st.form_submit_button("❌ ลบ User นี้", use_container_width=True, disabled=is_new_mode)
+            
+            with col_b3:
+                # ปุ่ม "เคลียร์ฟอร์ม"
+                st.form_submit_button("🆕", on_click=clear_user_form, use_container_width=True, help="ล้างฟอร์มและเริ่มใหม่")
+
+            # --- (ใหม่) Logic การประมวลผลเมื่อกดปุ่ม ---
+            
+            # 3A. Logic ปุ่ม "บันทึก" (Save / Update)
+            if save_button:
+                if not user_id:
                     st.error("กรุณาป้อน User ID")
                 else:
                     try:
-                        # 1. ตรวจสอบว่า User ID นี้ซ้ำหรือไม่
-                        check_query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
-                        check_params = {"user_id": new_user_id}
-                        check_df = supabase_conn.query(check_query, params=check_params, ttl=5)
-                        
-                        if not check_df.empty and check_df['count'][0] > 0:
-                            st.error(f"⚠️ User ID '{new_user_id}' นี้มีในระบบแล้ว! ไม่สามารถเพิ่มซ้ำได้")
-                        else:
-                            # 2. ถ้าไม่ซ้ำ ให้ Insert ข้อมูล
-                            insert_query = """
-                            INSERT INTO user_data (user_id, "Employee_Name", "Employee_Surname")
-                            VALUES (:user_id, :name, :surname)
-                            """
-                            insert_params = {
-                                "user_id": new_user_id,
-                                "name": new_emp_name,
-                                "surname": new_emp_surname
-                            }
-                            
-                            with supabase_conn.session as session:
-                                # --- 🟢 (แก้ไข) หุ้ม query ด้วย text() ---
-                                session.execute(text(insert_query), insert_params)
-                                # --- 🟢 สิ้นสุด 🟢 ---
+                        with supabase_conn.session as session:
+                            if is_new_mode:
+                                # (โหมด "สร้างใหม่")
+                                # 1. ตรวจสอบซ้ำก่อน
+                                check_query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
+                                check_df = supabase_conn.query(check_query, params={"user_id": user_id}, ttl=5)
+                                if not check_df.empty and check_df['count'][0] > 0:
+                                    st.error(f"⚠️ User ID '{user_id}' นี้มีในระบบแล้ว! ไม่สามารถเพิ่มซ้ำได้")
+                                else:
+                                    # 2. Insert
+                                    insert_query = text("""
+                                        INSERT INTO user_data (user_id, "Employee_Name", "Employee_Surname")
+                                        VALUES (:user_id, :name, :surname)
+                                    """)
+                                    session.execute(insert_query, {"user_id": user_id, "name": emp_name, "surname": emp_surname})
+                                    session.commit()
+                                    st.success(f"บันทึก User '{user_id}' สำเร็จ!")
+                                    st.cache_data.clear() # ล้าง Cache เพื่อให้ Dropdown อัปเดต
+                                    st.rerun() # Rerun เพื่อโหลด Dropdown ใหม่
+                            else:
+                                # (โหมด "แก้ไข")
+                                update_query = text("""
+                                    UPDATE user_data
+                                    SET "Employee_Name" = :name, "Employee_Surname" = :surname
+                                    WHERE user_id = :user_id
+                                """)
+                                session.execute(update_query, {"user_id": user_id, "name": emp_name, "surname": emp_surname})
                                 session.commit()
-                            
-                            st.success(f"บันทึก User '{new_user_id}' ลงในระบบสำเร็จ!")
+                                st.success(f"อัปเดต User '{user_id}' สำเร็จ!")
+                                st.cache_data.clear()
+                                st.rerun()
+                                
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาด: {e}")
+
+            # 3B. Logic ปุ่ม "ลบ" (Delete)
+            if delete_button:
+                if not user_id:
+                    st.error("ไม่ได้เลือก User ที่จะลบ")
+                else:
+                    try:
+                        with supabase_conn.session as session:
+                            delete_query = text("DELETE FROM user_data WHERE user_id = :user_id")
+                            session.execute(delete_query, {"user_id": user_id})
+                            session.commit()
+                            st.warning(f"ลบ User '{user_id}' ออกจากระบบแล้ว!")
+                            st.cache_data.clear()
+                            clear_user_form() # ล้างฟอร์มหลังลบ
+                            st.rerun()
                             
                     except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาดในการบันทึก User: {e}")
-    # --- (สิ้นสุด Form) ---
+                        st.error(f"เกิดข้อผิดพลาดในการลบ: {e}")
 
+    # --- (สิ้นสุด Form จัดการ User) ---
 
     st.divider() 
     
+    # --- (ส่วนที่ 2: ค้นหาข้อมูลที่สแกนแล้ว - เหมือนเดิม) ---
     st.header("ค้นหาข้อมูลที่สแกนแล้ว")
     
     show_error = False 
