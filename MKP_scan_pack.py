@@ -118,6 +118,33 @@ def save_all_to_db():
     if not st.session_state.temp_barcode:
          st.error("ไม่พบ Barcode! (เกิดข้อผิดพลาด) กรุณาล้างและสแกนใหม่")
          return
+    def validate_and_lock_user(user_id_to_check):
+    """(ใหม่) ตรวจสอบ User ID กับ DB และล็อคค่าถ้าถูกต้อง"""
+    if not user_id_to_check:
+        return False
+        
+    try:
+        # 1. ค้นหา User
+        query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
+        params = {"user_id": user_id_to_check}
+        result_df = supabase_conn.query(query, params=params, ttl=60) 
+        
+        if not result_df.empty and result_df['count'][0] > 0:
+            # 2. ถ้าเจอ: ล็อค User และล้าง Error (ถ้ามี)
+            st.session_state.current_user = user_id_to_check
+            st.success(f"User: {user_id_to_check} ถูกล็อคแล้ว")
+            st.session_state.show_user_not_found_error = False
+            return True
+        else:
+            # 3. ถ้าไม่เจอ: ตั้งค่า Error (ไม่ล็อค User)
+            st.session_state.show_user_not_found_error = True
+            st.session_state.last_failed_user_scan = user_id_to_check
+            return False
+            
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการตรวจสอบ User: {e}")
+        st.session_state.show_user_not_found_error = False 
+        return False
          
     try:
         data_to_insert = []
@@ -154,13 +181,30 @@ def save_all_to_db():
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (เพิ่ม Logic ตรวจสอบ User) ---
+# --- TAB 1: หน้าสแกน (เพิ่มปุ่มคีย์ Manual) ---
 with tab1:
-    #st.header("บันทึกการสแกน") 
+    st.header("บันทึกการสแกน") 
 
     # --- ส่วนที่ 1: กล้องสแกน และ ข้อความแนะนำ (Dynamic) ---
     scanner_prompt_placeholder = st.empty() 
     scan_value = qrcode_scanner(key=st.session_state.scanner_key)
+
+    # --- (ใหม่) เพิ่มส่วนการคีย์ Manual ใต้กล้อง ---
+    if not st.session_state.current_user: # แสดงเฉพาะเมื่อยังไม่มี User
+        with st.expander("คีย์ User ID (กรณีสแกนไม่ได้)"):
+            with st.form(key="manual_user_form"):
+                manual_user_id = st.text_input("ป้อน User ID:")
+                manual_user_submit = st.form_submit_button("ล็อค User")
+
+            if manual_user_submit:
+                if manual_user_id:
+                    # เรียกใช้ฟังก์ชันตรวจสอบเดียวกัน
+                    if validate_and_lock_user(manual_user_id):
+                        st.session_state.last_scan_processed = manual_user_id 
+                        st.rerun() # Rerun เพื่ออัปเดตหน้าจอ
+                else:
+                    st.warning("กรุณาป้อน User ID")
+    # --- (สิ้นสุดส่วน Manual) ---
 
     # --- ส่วนที่ 2: Logic ประมวลผลการสแกน ---
     is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
@@ -170,28 +214,8 @@ with tab1:
         
         # --- 2A: State 1: ยังไม่มี User ---
         if not st.session_state.current_user:
-            
-            # --- 🟢 (แก้ไข) Logic การตรวจสอบ User ---
-            try:
-                # 1. ค้นหา User ใน table 'user_data'
-                query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
-                params = {"user_id": scan_value}
-                # (ใช้ ttl=60 เพื่อ cache ผลการค้น 60 วิ, ลดการโหลด DB)
-                result_df = supabase_conn.query(query, params=params, ttl=60) 
-                
-                if not result_df.empty and result_df['count'][0] > 0:
-                    # 2. ถ้าเจอ: ล็อค User และล้าง Error (ถ้ามี)
-                    st.session_state.current_user = scan_value
-                    st.success(f"User: {scan_value} ถูกล็อคแล้ว")
-                    st.session_state.show_user_not_found_error = False
-                else:
-                    # 3. ถ้าไม่เจอ: ตั้งค่า Error (ไม่ล็อค User)
-                    st.session_state.show_user_not_found_error = True
-                    st.session_state.last_failed_user_scan = scan_value
-                    
-            except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดในการตรวจสอบ User: {e}")
-                st.session_state.show_user_not_found_error = False # ไม่ล็อคหน้าจอถ้า DB error
+            # --- 🟢 (แก้ไข) เรียกใช้ฟังก์ชันใหม่ ---
+            validate_and_lock_user(scan_value)
             # --- 🟢 (สิ้นสุดการแก้ไข) ---
 
         # --- 2B: State 2: มี User, ไม่มี Barcode ---
@@ -226,12 +250,10 @@ with tab1:
 
     # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ (Dynamic) ---
     if not st.session_state.current_user:
-        # --- 🟢 (แก้ไข) แสดง Error ถ้าหา User ไม่เจอ ---
         if st.session_state.show_user_not_found_error:
-            scanner_prompt_placeholder.error(f"⚠️ ไม่พบ User '{st.session_state.last_failed_user_scan}' ในระบบ! กรุณาสแกน User ที่ถูกต้อง", icon="⚠️")
+            scanner_prompt_placeholder.error(f"⚠️ ไม่พบ User '{st.session_state.last_failed_user_scan}' ในระบบ! กรุณาสแกน User หรือคีย์ User ที่ถูกต้อง", icon="⚠️")
         else:
-            scanner_prompt_placeholder.info("ขั้นตอนที่ 1: สแกน 'ชื่อผู้ใช้งาน'...")
-        # --- 🟢 (สิ้นสุดการแก้ไข) ---
+            scanner_prompt_placeholder.info("ขั้นตอนที่ 1: สแกน 'ชื่อผู้ใช้งาน' (หรือคีย์ด้านล่าง)")
         
     elif not st.session_state.temp_barcode:
         scanner_prompt_placeholder.info("ขั้นตอนที่ 2: สแกน Barcode สินค้า...")
@@ -242,7 +264,6 @@ with tab1:
             scanner_prompt_placeholder.info("ขั้นตอนที่ 3: สแกน Tracking Number ทีละกล่อง...")
 
     # --- ส่วนที่ 4: แสดงผล (Display Area) ---
-    # (ส่วนนี้เหมือนเดิม ไม่ต้องแก้ไข)
     st.divider()
     st.subheader("1. ผู้ใช้งาน (User)")
     if st.session_state.current_user:
