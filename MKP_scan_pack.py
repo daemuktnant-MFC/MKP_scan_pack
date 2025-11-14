@@ -101,20 +101,18 @@ def clear_all_and_restart():
     st.session_state.staged_scans = []
     st.session_state.show_duplicate_tracking_error = False
     st.session_state.last_scanned_tracking = ""
-    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}" # บังคับสร้างกล้องใหม่
+    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}" 
     st.session_state.last_scan_processed = ""
     st.session_state.show_user_not_found_error = False
     st.session_state.last_failed_user_scan = ""
 
 def acknowledge_error_and_reset_scanner():
     """(ใหม่) เคลียร์ Error (User/Tracking ซ้ำ) และรีเซ็ตกล้อง"""
-    # ล้างธง Error ทั้งหมด
     st.session_state.show_user_not_found_error = False
     st.session_state.last_failed_user_scan = ""
     st.session_state.show_duplicate_tracking_error = False
     st.session_state.last_scanned_tracking = ""
     
-    # (สำคัญ) รีเซ็ตกล้องเพื่อล้างค่าที่ "ค้าง"
     st.session_state.scanner_key = f"scanner_{uuid.uuid4()}"
     st.session_state.last_scan_processed = ""
 
@@ -124,19 +122,16 @@ def validate_and_lock_user(user_id_to_check):
         return False
         
     try:
-        # 1. ค้นหา User
         query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
         params = {"user_id": user_id_to_check}
         result_df = supabase_conn.query(query, params=params, ttl=60) 
         
         if not result_df.empty and result_df['count'][0] > 0:
-            # 2. ถ้าเจอ: ล็อค User และล้าง Error (ถ้ามี)
             st.session_state.current_user = user_id_to_check
             st.success(f"User: {user_id_to_check} ถูกล็อคแล้ว")
             st.session_state.show_user_not_found_error = False
             return True
         else:
-            # 3. ถ้าไม่เจอ: ตั้งค่า Error (ไม่ล็อค User)
             st.session_state.show_user_not_found_error = True
             st.session_state.last_failed_user_scan = user_id_to_check
             return False
@@ -146,7 +141,7 @@ def validate_and_lock_user(user_id_to_check):
         st.session_state.show_user_not_found_error = False 
         return False
 
-# --- 🟢 (แก้ไข) นี่คือฟังก์ชันที่ถูกต้อง ---
+# --- 🟢 (แก้ไข) เปลี่ยนวิธีบันทึกข้อมูลใน save_all_to_db ---
 def save_all_to_db():
     """บันทึก Staging list ทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
@@ -159,7 +154,6 @@ def save_all_to_db():
          st.error("ไม่พบ Barcode! (เกิดข้อผิดพลาด) กรุณาล้างและสแกนใหม่")
          return
     
-    # --- (Logic การบันทึก ต้องอยู่ "ข้างใน" ฟังก์ชันนี้) ---
     try:
         data_to_insert = []
         THAI_TZ = pytz.timezone("Asia/Bangkok")
@@ -174,13 +168,19 @@ def save_all_to_db():
             })
         
         df_to_insert = pd.DataFrame(data_to_insert)
-        df_to_insert.to_sql(
-            "scans", 
-            con=supabase_conn.engine, 
-            if_exists="append", 
-            index=False
-        )
         
+        # --- (นี่คือการแก้ไข) ---
+        # ใช้ .session และ .commit() เพื่อบังคับการบันทึก
+        with supabase_conn.session as session:
+            df_to_insert.to_sql(
+                "scans", 
+                con=session.connection(), # <-- เปลี่ยนจาก .engine เป็น .connection()
+                if_exists="append", 
+                index=False
+            )
+            session.commit() # <-- สั่ง Commit ธุรกรรม
+        # --- (สิ้นสุดการแก้ไข) ---
+
         saved_count = len(st.session_state.staged_scans)
         st.session_state.scan_count += saved_count 
         
