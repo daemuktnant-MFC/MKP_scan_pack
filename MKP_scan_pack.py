@@ -201,7 +201,7 @@ tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อ�
 
 # --- TAB 1: หน้าสแกน (ปรับ Layout User/Barcode) ---
 with tab1:
-    st.header("บันทึกการสแกน") 
+    #st.header("บันทึกการสแกน") 
 
     # --- ส่วนที่ 1: กล้องสแกน และ ข้อความแนะนำ (Dynamic) ---
     scanner_prompt_placeholder = st.empty() 
@@ -292,7 +292,7 @@ with tab1:
     col_user, col_barcode = st.columns(2)
     
     with col_user:
-        st.subheader("1. ผู้ใช้งาน (User)")
+        st.subheader("1.User)")
         if st.session_state.current_user:
             st.code(st.session_state.current_user)
             # (เพิ่ม use_container_width=True ให้ปุ่มเต็มกล่อง)
@@ -301,7 +301,7 @@ with tab1:
             st.info("...รอล็อค User...")
     
     with col_barcode:
-        st.subheader("2. Barcode ที่ล็อคอยู่")
+        st.subheader("2.Barcode")
         if st.session_state.current_user:
             if st.session_state.temp_barcode:
                 st.code(st.session_state.temp_barcode)
@@ -309,8 +309,6 @@ with tab1:
                 st.info("...รอล็อค Barcode...")
         else:
             st.info("...รอ User ก่อน...") # (Placeholder เพื่อจัด Layout)
-    # --- 🟢 (สิ้นสุดการแก้ไขส่วนที่ 4) ---
-    
     
     # --- ส่วนที่ 5: ปุ่มบันทึก และ รายการที่กำลังสแกน ---
     # (จะแสดงส่วนนี้ต่อเมื่อมี User แล้ว)
