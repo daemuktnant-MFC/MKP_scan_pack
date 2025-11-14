@@ -8,7 +8,7 @@ import pytz
 from sqlalchemy import text
 import numpy as np
 
-# --- (CSS สำหรับ Mobile Layout - อัปเดต) ---
+# --- (CSS สำหรับ Mobile Layout - อัปเดตตัวเลือก CSS) ---
 st.markdown("""
 <style>
 /* 1. Base Layout (เหมือนเดิม) */
@@ -19,9 +19,9 @@ div.block-container {
 /* 2. Headers (เหมือนเดิม) */
 h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
 
-/* (แก้ไข) เลือก h3 (subheader) ให้เฉพาะเจาะจงขึ้น */
-/* (เพื่อให้หัวข้อ "1. ผู้ใช้งาน" และ "2. Barcode" เล็กลง) */
-div[data-testid="stVerticalBlock"] h3 { 
+/* --- 🟢 (แก้ไข) เลือก h3 (subheader) ให้เฉพาะเจาะจงขึ้น --- */
+/* (เลือก h3 ที่อยู่ใน Columns ที่เราจะจัด layout เท่านั้น) */
+div[data-testid="stTabs-panel-0"] > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] h3 { 
     font-size: 1.0rem !important; 
     margin-top: 1rem; 
     margin-bottom: 0.5rem; 
@@ -54,10 +54,10 @@ div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
     height: 2.8em !important; 
 }
 
-/* --- 🟢 (ใหม่) 7. บังคับ Columns ให้อยู่ข้างกันบนมือถือ --- */
+/* --- 🟢 (แก้ไข) 7. บังคับ Columns ให้อยู่ข้างกัน (เจาะจงมากขึ้น) --- */
+/* (เลือก stHorizontalBlock ที่เป็นลูกโดยตรงของ Tab 1 เท่านั้น) */
 @media (max-width: 640px) {
-    /* เลือก container ของ st.columns */
-    div[data-testid="stHorizontalBlock"] {
+    div[data-testid="stTabs-panel-0"] > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] {
         /* บังคับให้เป็น 2 Columns (1fr 1fr) เสมอ */
         grid-template-columns: 1fr 1fr !important; 
         gap: 0.75rem !important; /* เพิ่มช่องว่างระหว่าง Column */
@@ -66,7 +66,6 @@ div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
 </style>
 """, unsafe_allow_html=True)
 # --- จบ Custom CSS ---
-
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
 st.set_page_config(page_title="Box Scanner", layout="wide")
