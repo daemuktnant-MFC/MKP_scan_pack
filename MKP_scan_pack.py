@@ -295,7 +295,7 @@ with tab1:
                                   use_container_width=True
                                  )
                         
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Error ปุ่มลบ) ---
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Error ปุ่มลบ ครั้งสุดท้าย) ---
 with tab2:
     st.header("จัดการข้อมูล User")
 
@@ -428,11 +428,10 @@ with tab2:
                             st.cache_data.clear()
                             
                             # --- 🟢 (แก้ไข) ---
-                            # (อย่าแตะ st.session_state.selected_user_to_edit)
-                            # ให้เคลียร์แค่ Text Inputs ด้วยตนเอง
-                            st.session_state.user_id_input = ""
-                            st.session_state.emp_name_input = ""
-                            st.session_state.emp_surname_input = ""
+                            # ลบ 3 บรรทัดที่พยายามแก้ไข Text Input
+                            # (st.session_state.user_id_input = "") <- ลบ
+                            # (st.session_state.emp_name_input = "") <- ลบ
+                            # (st.session_state.emp_surname_input = "") <- ลบ
                             # --- 🟢 สิ้นสุด 🟢 ---
                             
                             st.rerun() # Rerun เพื่อโหลดหน้าใหม่
@@ -503,7 +502,7 @@ with tab2:
             
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
-                return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                return df_to_convert.to_csv(index.False, encoding='utf-8-sig').encode('utf-8-sig')
             
             csv_data = convert_df_to_csv(data_df)
             
