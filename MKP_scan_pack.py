@@ -337,12 +337,12 @@ with tab1:
                                   args=(item['id'],),
                                   use_container_width=True
                                  )
-                        
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Expander ให้ซ่อน) ---
+
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เพิ่ม JOIN ดึงชื่อ) ---
 with tab2:
     st.header("จัดการข้อมูล User")
 
-    # --- (ดึงข้อมูล User ทั้งหมดสำหรับ Dropdown) ---
+    # --- (ส่วนที่ 1: Form จัดการ User - เหมือนเดิม) ---
     @st.cache_data(ttl=60) 
     def get_all_users():
         try:
@@ -360,14 +360,12 @@ with tab2:
     
     user_id_list = ["(เลือก User เพื่อ แก้ไข/ลบ)", "--- เพิ่ม User ใหม่ ---"] + user_df["user_id"].tolist()
 
-    # --- (ฟังก์ชันสำหรับปุ่ม "New") ---
     def clear_user_form():
         st.session_state.selected_user_to_edit = "(เลือก User เพื่อ แก้ไข/ลบ)"
         st.session_state.user_id_input = ""
         st.session_state.emp_name_input = ""
         st.session_state.emp_surname_input = ""
 
-    # --- (ฟังก์ชันสำหรับอัปเดต Form เมื่อ Dropdown เปลี่ยน) ---
     def on_user_select():
         selected_id = st.session_state.selected_user_to_edit
         
@@ -381,16 +379,11 @@ with tab2:
             st.session_state.emp_name_input = user_data["Employee_Name"]
             st.session_state.emp_surname_input = user_data["Employee_Surname"]
         else:
-            # (ถ้าเลือก "(เลือก User...)" ให้ล้างฟอร์ม)
             st.session_state.user_id_input = ""
             st.session_state.emp_name_input = ""
             st.session_state.emp_surname_input = ""
 
-    # --- UI ส่วนที่ 1: Form จัดการ User ---
-    
-    # --- 🟢 (แก้ไข) เปลี่ยน expanded=True เป็น expanded=False ---
     with st.expander("คลิกเพื่อเปิดฟอร์ม จัดการ User", expanded=False):
-    # --- 🟢 สิ้นสุด 🟢 ---
         
         st.selectbox(
             "เลือก User (เพื่อ แก้ไข/ลบ) หรือเลือก 'เพิ่ม User ใหม่'",
@@ -419,9 +412,6 @@ with tab2:
             with col_b3:
                 st.form_submit_button("🆕", on_click=clear_user_form, use_container_width=True, help="ล้างฟอร์มและเริ่มใหม่")
 
-            # --- Logic การประมวลผลเมื่อกดปุ่ม ---
-            
-            # 3A. Logic ปุ่ม "บันทึก" (Save / Update)
             if save_button:
                 if not user_id:
                     st.error("กรุณาป้อน User ID")
@@ -429,7 +419,6 @@ with tab2:
                     try:
                         with supabase_conn.session as session:
                             if is_new_mode:
-                                # (โหมด "สร้างใหม่")
                                 check_query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
                                 check_df = supabase_conn.query(check_query, params={"user_id": user_id}, ttl=5)
                                 if not check_df.empty and check_df['count'][0] > 0:
@@ -445,7 +434,6 @@ with tab2:
                                     st.cache_data.clear() 
                                     st.rerun() 
                             else:
-                                # (โหมด "แก้ไข")
                                 update_query = text("""
                                     UPDATE user_data
                                     SET "Employee_Name" = :name, "Employee_Surname" = :surname
@@ -460,7 +448,6 @@ with tab2:
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาด: {e}")
 
-            # 3B. Logic ปุ่ม "ลบ" (Delete)
             if delete_button:
                 if not user_id:
                     st.error("ไม่ได้เลือก User ที่จะลบ")
@@ -476,7 +463,6 @@ with tab2:
                             
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาดในการลบ: {e}")
-
     # --- (สิ้นสุด Form จัดการ User) ---
 
     st.divider() 
@@ -502,33 +488,53 @@ with tab2:
             st.error("วันที่เริ่มต้น (From) ต้องมาก่อนวันที่สิ้นสุด (To)")
             show_error = True 
 
-    #st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
-    #st.divider()
+    st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
+    st.divider()
 
+    # --- 🟢 (แก้ไข) อัปเดต Query ทั้งหมด ---
     try:
-        query = "SELECT * FROM scans" 
+        # 1. เปลี่ยน SELECT * เป็นการ SELECT แบบเจาะจง
+        #    และใช้ CONCAT_WS เพื่อรวมชื่อ-นามสกุล
+        query = """
+            SELECT 
+                s.id, 
+                s.created_at, 
+                s.user_id, 
+                CONCAT_WS(' ', u."Employee_Name", u."Employee_Surname") AS "ชื่อ นามสกุล",
+                s.tracking_code, 
+                s.product_barcode
+            FROM 
+                scans s
+            LEFT JOIN 
+                user_data u ON s.user_id = u.user_id
+        """
+        
         filters = []
         params = {}
+        
+        # 2. อัปเดต Filter ให้ใช้ 's.user_id' (เพราะเราใช้ Alias 's')
         if filter_user:
-            filters.append("user_id = :user")
+            filters.append("s.user_id = :user")
             params["user"] = filter_user
         
         if not show_error: 
+            # 3. อัปเดต Filter วันที่ ให้ใช้ 's.created_at'
             if start_date and end_date:
-                filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') BETWEEN :start AND :end")
+                filters.append("DATE(s.created_at AT TIME ZONE 'Asia/Bangkok') BETWEEN :start AND :end")
                 params["start"] = start_date
                 params["end"] = end_date
             elif start_date:
-                filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') >= :start")
+                filters.append("DATE(s.created_at AT TIME ZONE 'Asia/Bangkok') >= :start")
                 params["start"] = start_date
             elif end_date:
-                filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') <= :end")
+                filters.append("DATE(s.created_at AT TIME ZONE 'Asia/Bangkok') <= :end")
                 params["end"] = end_date
             
         if filters:
             query += " WHERE " + " AND ".join(filters)
         
-        query += " ORDER BY created_at DESC"
+        # 4. อัปเดต ORDER BY ให้ใช้ 's.created_at'
+        query += " ORDER BY s.created_at DESC"
         
         if show_error:
             data_df = pd.DataFrame() 
