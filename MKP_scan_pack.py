@@ -63,8 +63,8 @@ div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
 
 /* --- 🟢 (ใหม่) 9. ลดขนาดตัวอักษรที่กำหนด --- */
 
-/* (เป้าหมายที่ 1: Header "บันทึกการสแกน...") */
-/* (st.header -> h2) */
+#/* (เป้าหมายที่ 1: Header "บันทึกการสแกน...") */
+/* st.header -> h2 */
 div[data-testid="stTabs-panel-0"] h2 {
     font-size: 0.5rem !important;
     margin-bottom: 0.5rem !important;
