@@ -66,9 +66,9 @@ div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
 /* (เป้าหมายที่ 1: Header "บันทึกการสแกน...") */
 /* (เลือก h2 ที่อยู่ใน Tab 1) */
 div[data-testid="stTabs-panel-0"] [data-testid="stVerticalBlock"] h2 {
-    font-size: 1.2rem !important; 
+    font-size: 0.5rem !important; 
     margin-bottom: 0.5rem !important;
-    line-height: 1.2 !important; 
+    line-height: 0.5 !important; 
 }
 
 /* (เป้าหมายที่ 2: Prompt "ขั้นตอนที่ 1...") */
@@ -296,7 +296,7 @@ with tab1:
     
     # --- 🟢 (Phase 1: Mode Selection - เหมือนเดิม) ---
     if st.session_state.scan_mode is None:
-        st.header("เลือกโหมดการสแกน")
+        st.header("เลือก Menu")
         st.button("โหมด Bulk (1 Barcode ➔ N Trackings)", on_click=set_scan_mode, args=("Bulk",), use_container_width=True, type="primary")
         st.button("โหมด Single (1 Tracking ➔ 1 Barcode)", on_click=set_scan_mode, args=("Single",), use_container_width=True)
         
@@ -311,7 +311,7 @@ with tab1:
     elif st.session_state.scan_mode is not None and not st.session_state.current_user:
         
         mode_name = "โหมด Bulk" if st.session_state.scan_mode == "Bulk" else "โหมด Single"
-        st.header(f"บันทึกการสแกน ({mode_name})")
+        st.header(f"{mode_name}))
         
         scanner_prompt_placeholder = st.empty() 
         scan_value = qrcode_scanner(key=st.session_state.scanner_key)
@@ -350,7 +350,7 @@ with tab1:
         if st.session_state.scan_mode == "Bulk":
             
             mode_name = "โหมด Bulk" # (เพิ่ม)
-            st.header(f"บันทึกการสแกน ({mode_name})") # (เพิ่ม)
+            st.header(f"{mode_name}") # (เพิ่ม)
 
             scanner_prompt_placeholder = st.empty() 
             scan_value = qrcode_scanner(key=st.session_state.scanner_key)
@@ -448,7 +448,7 @@ with tab1:
         elif st.session_state.scan_mode == "Single":
             
             mode_name = "โหมด Single" # (เพิ่ม)
-            st.header(f"บันทึกการสแกน ({mode_name})") # (เพิ่ม)
+            st.header(f"{mode_name}") # (เพิ่ม)
             
             st.subheader("ผู้ใช้งาน (User)")
             st.code(st.session_state.current_user)
