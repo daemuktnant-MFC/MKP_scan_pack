@@ -1,2 +1,4 @@
 [server]
 pythonVersion = "3.11"
+[client]
+showCreatorBadge = false
