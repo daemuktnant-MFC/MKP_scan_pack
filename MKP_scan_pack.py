@@ -61,19 +61,20 @@ div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
     }
 }
 
-/* --- 🟢 (ใหม่) 9. ลดขนาดตัวอักษรที่กำหนด --- */
+/* --- 🟢 (แก้ไข) 9. ลดขนาดตัวอักษร (เจาะจงมากขึ้น) --- */
 
 /* (เป้าหมายที่ 1: Header "บันทึกการสแกน...") */
-/* (st.header -> h1) */
-div[data-testid="stTabs-panel-0"] h1 {
-    font-size: 0.5rem !important;
+/* (เลือก h2 ที่อยู่ใน Tab 1) */
+div[data-testid="stTabs-panel-0"] [data-testid="stVerticalBlock"] h2 {
+    font-size: 1.2rem !important; 
     margin-bottom: 0.5rem !important;
+    line-height: 1.2 !important; 
 }
 
 /* (เป้าหมายที่ 2: Prompt "ขั้นตอนที่ 1...") */
-/* (st.info -> [data-testid="stInfo"]) */
-/* (st.error -> [data-testid="stError"]) */
-[data-testid="stInfo"], [data-testid="stError"] {
+/* (เลือก Info/Error ที่อยู่ใน Tab 1) */
+div[data-testid="stTabs-panel-0"] [data-testid="stInfo"],
+div[data-testid="stTabs-panel-0"] [data-testid="stError"] {
     font-size: 0.85rem !important;
     padding: 0.6rem 0.75rem !important;
 }
