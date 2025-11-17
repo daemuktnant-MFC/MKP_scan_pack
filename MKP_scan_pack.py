@@ -85,7 +85,7 @@ div[data-testid="stTabs-panel-0"] [data-testid="stError"] {
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
 st.set_page_config(page_title="Box Scanner", layout="wide")
-st.title("📦 App สแกน Tracking")
+st.title("📦 สแกนแปะ Tracking")
 
 @st.cache_resource
 def init_supabase_connection():
