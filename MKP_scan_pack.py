@@ -311,7 +311,7 @@ with tab1:
     elif st.session_state.scan_mode is not None and not st.session_state.current_user:
         
         mode_name = "โหมด Bulk" if st.session_state.scan_mode == "Bulk" else "โหมด Single"
-        st.header(f"{mode_name}))
+        st.header(f"{mode_name}")
         
         scanner_prompt_placeholder = st.empty() 
         scan_value = qrcode_scanner(key=st.session_state.scanner_key)
