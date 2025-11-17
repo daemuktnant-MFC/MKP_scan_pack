@@ -297,7 +297,7 @@ with tab1:
     # --- 🟢 (Phase 1: Mode Selection - เหมือนเดิม) ---
     if st.session_state.scan_mode is None:
         st.header("เลือก Menu")
-        st.button("โหมด Bulk (1 Barcode ➔ N Trackings)", on_click=set_scan_mode, args=("Bulk",), use_container_width=True, type="primary")
+        st.button("โหมด Bulk (1 Barcode ➔ หลาย Trackings)", on_click=set_scan_mode, args=("Bulk",), use_container_width=True, type="primary")
         st.button("โหมด Single (1 Tracking ➔ 1 Barcode)", on_click=set_scan_mode, args=("Single",), use_container_width=True)
         
         st.divider()
