@@ -6,6 +6,7 @@ from streamlit.connections import SQLConnection
 from streamlit_qrcode_scanner import qrcode_scanner
 import uuid 
 import pytz 
+from sqlalchemy import text # 🟢 (เพิ่ม) Import ที่จำเป็น
 
 # --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
 st.markdown("""
@@ -72,19 +73,71 @@ if "staged_scans" not in st.session_state:
     st.session_state.staged_scans = []
 if "show_dialog_for" not in st.session_state:
     st.session_state.show_dialog_for = None 
-
-# --- 🟢 (แก้ไข) เพิ่ม State สำหรับ "กล่อง Error" 🟢 ---
 if "show_scan_error_message" not in st.session_state:
     st.session_state.show_scan_error_message = False
+
+# --- 🟢 (เพิ่ม) State จาก Bulk_version ---
+if "scanner_key" not in st.session_state:
+    st.session_state.scanner_key = "scanner_v1"
+if "last_scan_processed" not in st.session_state:
+    st.session_state.last_scan_processed = ""
+if "show_user_not_found_error" not in st.session_state:
+    st.session_state.show_user_not_found_error = False
+if "last_failed_user_scan" not in st.session_state:
+    st.session_state.last_failed_user_scan = ""
 # --- 🟢 สิ้นสุด 🟢 ---
 
-# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) (เหมือนเดิม) ---
+
+# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
+
 def delete_item(item_id_to_delete):
     st.session_state.staged_scans = [
         item for item in st.session_state.staged_scans 
         if item["id"] != item_id_to_delete
     ]
 
+# --- 🟢 (เพิ่ม) ฟังก์ชัน clear_all_and_restart (รวม 2 เวอร์ชัน) ---
+def clear_all_and_restart():
+    """ล้างทุกอย่างและเริ่มใหม่ทั้งหมด"""
+    # (จาก Bulk)
+    st.session_state.current_user = ""
+    st.session_state.staged_scans = []
+    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}" 
+    st.session_state.last_scan_processed = ""
+    st.session_state.show_user_not_found_error = False
+    st.session_state.last_failed_user_scan = ""
+    # (จาก Single)
+    st.session_state.temp_tracking = ""
+    st.session_state.temp_barcode = ""
+    st.session_state.show_dialog_for = None 
+    st.session_state.show_scan_error_message = False
+    st.rerun() # (เพิ่ม Rerun)
+
+# --- 🟢 (เพิ่ม) ฟังก์ชัน validate_and_lock_user ---
+def validate_and_lock_user(user_id_to_check):
+    """ตรวจสอบ User ID กับ DB และล็อคค่าถ้าถูกต้อง"""
+    if not user_id_to_check:
+        return False
+    try:
+        query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
+        params = {"user_id": user_id_to_check}
+        result_df = supabase_conn.query(query, params=params, ttl=60) 
+        
+        if not result_df.empty and result_df['count'][0] > 0:
+            st.session_state.current_user = user_id_to_check
+            st.success(f"User: {user_id_to_check} ถูกล็อคแล้ว")
+            st.session_state.show_user_not_found_error = False
+            return True
+        else:
+            st.session_state.show_user_not_found_error = True
+            st.session_state.last_failed_user_scan = user_id_to_check
+            return False
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการตรวจสอบ User: {e}")
+        st.session_state.show_user_not_found_error = False 
+        return False
+
+# --- (ฟังก์ชันเดิมจาก Single) ---
 def add_and_clear_staging():
     if st.session_state.temp_tracking and st.session_state.temp_barcode:
         st.session_state.staged_scans.append({
@@ -97,10 +150,16 @@ def add_and_clear_staging():
         st.session_state.show_dialog_for = None 
     st.rerun() 
 
+# --- 🟢 (แก้ไข) ฟังก์ชัน save_all_to_db ---
 def save_all_to_db():
     if not st.session_state.staged_scans:
         st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
         return
+    # (เพิ่มการตรวจสอบ User/Barcode ก่อนบันทึก)
+    if not st.session_state.current_user:
+        st.error("ไม่พบชื่อผู้ใช้งาน! กรุณาเริ่มใหม่")
+        return
+
     try:
         data_to_insert = []
         THAI_TZ = pytz.timezone("Asia/Bangkok")
@@ -115,19 +174,24 @@ def save_all_to_db():
             })
         
         df_to_insert = pd.DataFrame(data_to_insert)
-        df_to_insert.to_sql(
-            "scans", 
-            con=supabase_conn.engine, 
-            if_exists="append", 
-            index=False
-        )
+        
+        # (ใช้วิธีบันทึกแบบ .session ที่เสถียรกว่า)
+        with supabase_conn.session as session:
+            df_to_insert.to_sql(
+                "scans", 
+                con=session.connection(),
+                if_exists="append", 
+                index=False
+            )
+            session.commit()
         
         saved_count = len(st.session_state.staged_scans)
         st.session_state.scan_count += saved_count
-        st.session_state.staged_scans = []
-        st.session_state.current_user = "" 
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
-        st.rerun() 
+        
+        clear_all_and_restart() # (เรียกใช้ฟังก์ชันล้างค่าใหม่)
+        # (st.rerun() ถูกย้ายไปอยู่ใน clear_all_and_restart)
+        
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
 
@@ -155,25 +219,62 @@ tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อ�
 # --- TAB 1: หน้าสแกน (ปรับ Layout) ---
 with tab1:
     st.header("บันทึกการสแกน")
+    
+    # (ย้าย Metric มาไว้บนสุด)
+    st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
+    st.divider()
 
-    # --- 🟢 (แก้ไข) Logic แสดง "กล่อง Error" 🟢 ---
-    # เราจะแสดงกล่อง Error ถ้าธงเป็น True
-    # และจะไม่ล้างธง จนกว่าจะสแกน Barcode ถูก
-    if st.session_state.get("show_scan_error_message", False):
-        st.error("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
-        # ❌ (ลบ) ลบบรรทัด st.session_state.show_scan_error_message = False ทิ้ง
-    # --- 🟢 สิ้นสุด 🟢 ---
+    # --- 🟢 (เพิ่ม) Logic การสแกน/ล็อค User ---
+    
+    # (ใช้ scanner ร่วม)
+    scanner_prompt_placeholder = st.empty() 
+    scan_value = qrcode_scanner(key=st.session_state.scanner_key)
 
-    col_user, col_metric = st.columns([3, 2]) 
-    with col_user:
-        st.text_input("ชื่อผู้ใช้งาน (User):", key="current_user") 
-    with col_metric:
-        st.metric("กล่องใน DB (รอบนี้)", st.session_state.scan_count)
+    # (ประมวลผลการสแกน)
+    is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
 
     if not st.session_state.current_user:
-        st.warning("ป้อนชื่อผู้ใช้งานก่อนเริ่มสแกน")
-    else:
+        # --- (ส่วนที่ 1: ยังไม่มี User) ---
         
+        # (แสดง Expander สำหรับคีย์ User)
+        with st.expander("คีย์ User ID (กรณีสแกนไม่ได้)"):
+            with st.form(key="manual_user_form"):
+                manual_user_id = st.text_input("ป้อน User ID:")
+                manual_user_submit = st.form_submit_button("ล็อค User")
+
+            if manual_user_submit:
+                if manual_user_id:
+                    if validate_and_lock_user(manual_user_id):
+                        st.session_state.last_scan_processed = manual_user_id 
+                        st.rerun() 
+                else:
+                    st.warning("กรุณาป้อน User ID")
+        
+        # (ประมวลผลการสแกน User)
+        if is_new_scan:
+            st.session_state.last_scan_processed = scan_value
+            if validate_and_lock_user(scan_value):
+                st.rerun()
+        
+        # (แสดงข้อความแนะนำ)
+        if st.session_state.show_user_not_found_error:
+            scanner_prompt_placeholder.error(f"⚠️ ไม่พบ User '{st.session_state.last_failed_user_scan}'! กรุณาสแกน User ที่ถูกต้อง", icon="⚠️")
+        else:
+            scanner_prompt_placeholder.info("ขั้นตอนที่ 1: สแกน 'ชื่อผู้ใช้งาน' (หรือคีย์ด้านล่าง)")
+
+    else:
+        # --- (ส่วนที่ 2: มี User แล้ว) ---
+        # (แสดงข้อมูล User และปุ่มล้างค่า)
+        st.subheader("ผู้ใช้งาน (User)")
+        st.code(st.session_state.current_user)
+        st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart)
+        st.divider()
+        
+        # --- ( Logic การสแกนเดิมของ Single_version) ---
+
+        if st.session_state.get("show_scan_error_message", False):
+            st.error("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
+
         if st.session_state.show_dialog_for == 'tracking':
              show_confirmation_dialog(is_tracking=True)
         elif st.session_state.show_dialog_for == 'barcode':
@@ -182,40 +283,40 @@ with tab1:
         st.subheader("1. สแกนที่นี่ (Scan Here)")
         
         if st.session_state.show_dialog_for is None:
+            # (อัปเดตข้อความ Prompt)
             if not st.session_state.temp_tracking:
-                st.info("ขั้นตอนที่ 1: สแกน Tracking...")
+                scanner_prompt_placeholder.info("ขั้นตอนที่ 2: สแกน Tracking...")
             elif not st.session_state.temp_barcode:
-                 # (ปรับ) ถ้ามี Error ให้แสดง Info แทน Success
                  if not st.session_state.show_scan_error_message:
-                     st.success("ขั้นตอนที่ 2: สแกน Barcode...")
+                     scanner_prompt_placeholder.success("ขั้นตอนที่ 3: สแกน Barcode...")
+                 else:
+                     scanner_prompt_placeholder.error("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
             else:
-                 st.success("สำเร็จ! เริ่มสแกน Tracking กล่องถัดไป")
-                 st.session_state.temp_tracking = "" 
-                 st.rerun() 
+                 # (สถานะนี้คือ สแกน Barcode สำเร็จ)
+                 add_and_clear_staging() # (ย้าย add_and_clear_staging มาที่นี่)
 
-            scan_value = qrcode_scanner(key="main_scanner")
-
-            if scan_value:
+            if is_new_scan:
+                st.session_state.last_scan_processed = scan_value
+                
                 # Logic 1: สแกน Tracking
                 if not st.session_state.temp_tracking:
-                    st.session_state.temp_tracking = scan_value
-                    st.session_state.show_dialog_for = 'tracking' 
-                    st.rerun() 
+                    if scan_value == st.session_state.current_user:
+                        st.warning("⚠️ นั่นคือ User! กรุณาสแกน Tracking", icon="⚠️")
+                    else:
+                        st.session_state.temp_tracking = scan_value
+                        st.session_state.show_dialog_for = 'tracking' 
+                        st.rerun() 
                 
                 # Logic 2: สแกน Barcode
                 elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
-                    if scan_value != st.session_state.temp_tracking:
-                        # (ถูกต้อง) นี่คือ Barcode
+                    if scan_value != st.session_state.temp_tracking and scan_value != st.session_state.current_user:
                         st.session_state.temp_barcode = scan_value
                         st.session_state.show_dialog_for = 'barcode' 
-                        # --- 🟢 (แก้ไข) ล้างธง Error ที่นี่ 🟢 ---
                         st.session_state.show_scan_error_message = False 
                         st.rerun() 
-                    
                     else:
-                        # (สแกนซ้ำ) นี่คือ Tracking เดิม
-                        st.session_state.show_scan_error_message = True # 1. ตั้งธง
-                        st.rerun() # 2. บังคับ rerun
+                        st.session_state.show_scan_error_message = True
+                        st.rerun()
                         
                 elif st.session_state.temp_tracking and st.session_state.temp_barcode:
                     st.warning("รอสักครู่ (ระบบกำลังเพิ่มรายการ) หรือเริ่มสแกน Tracking ถัดไปได้เลย")
@@ -236,7 +337,6 @@ with tab1:
         
         st.divider()
 
-        # --- (ย้ายมา) ปุ่มบันทึกข้อมูล ---
         st.button("💾 บันทึกทั้งหมด",
                   type="primary",
                   use_container_width=True,
@@ -244,7 +344,6 @@ with tab1:
                   disabled=(not st.session_state.staged_scans)
                  )
 
-        # --- (ปรับ) ส่วนที่ 3: ตารางพักข้อมูล (Layout แบบ Card) ---
         st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
         
         if not st.session_state.staged_scans:
@@ -275,6 +374,7 @@ with tab2:
         with col_f1:
             filter_user = st.text_input("กรองตาม User (เว้นว่างเพื่อแสดงทั้งหมด)")
         with col_col2:
+            # (แก้ไข) เปลี่ยนชื่อตัวแปรเป็น filter_date (เหมือนใน query)
             filter_date = st.date_input("กรองตามวันที่", value=None) 
     try:
         query = "SELECT * FROM scans"
