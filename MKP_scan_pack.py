@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
+import io
 from datetime import datetime
 from streamlit.connections import SQLConnection
 from streamlit_qrcode_scanner import qrcode_scanner
-import uuid
-import pytz
-from sqlalchemy import text
-import numpy as np
+import uuid 
+import pytz 
 
-# --- (CSS สำหรับ Mobile Layout - อัปเดตตัวเลือก CSS) ---
+# --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
 st.markdown("""
 <style>
 /* 1. Base Layout (เหมือนเดิม) */
@@ -18,54 +17,37 @@ div.block-container {
 }
 /* 2. Headers (เหมือนเดิม) */
 h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
-
-/* --- 🟢 (แก้ไข) เลือก h3 (subheader) ให้เฉพาะเจาะจงขึ้น --- */
-/* (เลือก h3 ที่อยู่ใน Columns ที่เราจะจัด layout เท่านั้น) */
-div[data-testid="stTabs-panel-0"] > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] h3 { 
-    font-size: 0.5rem !important; 
-    margin-top: 0.25rem; 
-    margin-bottom: 0.5rem; 
-}
-
+h3 { font-size: 1.15rem !important; margin-top: 1rem; margin-bottom: 0.5rem; }
 /* 3. Metric (เหมือนเดิม) */
 [data-testid="stMetric"] {
     padding-top: 0 !important; background-color: #FAFAFA;
-    border-radius: 0.25rem; padding: 0.25rem 1rem !important;
+    border-radius: 0.5rem; padding: 0.5rem 1rem !important;
 }
-[data-testid="stMetricValue"] { font-size: 0.9rem !important; }
+[data-testid="stMetricValue"] { font-size: 1.8rem !important; }
 [data-testid="stMetricLabel"] { font-size: 0.9rem !important; }
 
-/* 4. Staging Card Container (เหมือนเดิม) */
+/* 4. Staging Card Container (กรอบของแต่ละรายการ) */
 [data-testid="stVerticalBlock"] > [data-testid="stContainer"] {
     border: 1px solid #BBBBBB !important; 
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem !important; 
     margin-bottom: 0.5rem; 
 }
-/* 5. Code Box (เหมือนเดิม) */
+/* 5. Code Box (Tracking/Barcode) ในการ์ด */
 .stCode { 
     font-size: 0.75rem !important; 
     padding: 0.4em !important; 
 }
-/* 6. ปุ่ม "ลบ" (เหมือนเดิม) */
+/* 6. ปุ่ม "ลบ" (❌) ในการ์ด */
 div[data-testid="stHorizontalBlock"] > div:nth-child(2) .stButton button {
     font-size: 0.8rem !important; 
     padding: 0.4em 0.5em !important; 
     height: 2.8em !important; 
 }
-
-/* --- 🟢 (แก้ไข) 7. บังคับ Columns ให้อยู่ข้างกัน (เจาะจงมากขึ้น) --- */
-/* (เลือก stHorizontalBlock ที่เป็นลูกโดยตรงของ Tab 1 เท่านั้น) */
-@media (max-width: 640px) {
-    div[data-testid="stTabs-panel-0"] > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] {
-        /* บังคับให้เป็น 2 Columns (1fr 1fr) เสมอ */
-        grid-template-columns: 1fr 1fr !important; 
-        gap: 0.75rem !important; /* เพิ่มช่องว่างระหว่าง Column */
-    }
-}
 </style>
 """, unsafe_allow_html=True)
 # --- จบ Custom CSS ---
+
 
 # --- 1. ตั้งค่าหน้าจอและเชื่อมต่อ Supabase ---
 st.set_page_config(page_title="Box Scanner", layout="wide")
@@ -81,96 +63,44 @@ supabase_conn = init_supabase_connection()
 if "current_user" not in st.session_state:
     st.session_state.current_user = ""
 if "scan_count" not in st.session_state:
-    st.session_state.scan_count = 0 
+    st.session_state.scan_count = 0
+if "temp_tracking" not in st.session_state:
+    st.session_state.temp_tracking = ""
 if "temp_barcode" not in st.session_state:
-    st.session_state.temp_barcode = "" 
+    st.session_state.temp_barcode = ""
 if "staged_scans" not in st.session_state:
-    st.session_state.staged_scans = [] 
-if "show_duplicate_tracking_error" not in st.session_state:
-    st.session_state.show_duplicate_tracking_error = False 
-if "last_scanned_tracking" not in st.session_state:
-    st.session_state.last_scanned_tracking = "" 
-if "scanner_key" not in st.session_state:
-    st.session_state.scanner_key = "scanner_v1"
-if "last_scan_processed" not in st.session_state:
-    st.session_state.last_scan_processed = ""
-if "show_user_not_found_error" not in st.session_state:
-    st.session_state.show_user_not_found_error = False
-if "last_failed_user_scan" not in st.session_state:
-    st.session_state.last_failed_user_scan = ""
-if "selected_user_to_edit" not in st.session_state:
-    st.session_state.selected_user_to_edit = None
+    st.session_state.staged_scans = []
+if "show_dialog_for" not in st.session_state:
+    st.session_state.show_dialog_for = None 
+
+# --- 🟢 (แก้ไข) เพิ่ม State สำหรับ "กล่อง Error" 🟢 ---
+if "show_scan_error_message" not in st.session_state:
+    st.session_state.show_scan_error_message = False
 # --- 🟢 สิ้นสุด 🟢 ---
 
-# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) ---
-
+# --- 3. สร้างฟังก์ชันสำหรับปุ่ม (Callbacks) (เหมือนเดิม) ---
 def delete_item(item_id_to_delete):
-    """ลบรายการเดียวออกจาก Staging list"""
     st.session_state.staged_scans = [
         item for item in st.session_state.staged_scans 
         if item["id"] != item_id_to_delete
     ]
 
-def clear_all_and_restart():
-    """ล้างทุกอย่างและเริ่มใหม่ทั้งหมด (User, Barcode, Staging)"""
-    st.session_state.current_user = ""
-    st.session_state.temp_barcode = ""
-    st.session_state.staged_scans = []
-    st.session_state.show_duplicate_tracking_error = False
-    st.session_state.last_scanned_tracking = ""
-    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}" 
-    st.session_state.last_scan_processed = ""
-    st.session_state.show_user_not_found_error = False
-    st.session_state.last_failed_user_scan = ""
+def add_and_clear_staging():
+    if st.session_state.temp_tracking and st.session_state.temp_barcode:
+        st.session_state.staged_scans.append({
+            "id": str(uuid.uuid4()),
+            "tracking": st.session_state.temp_tracking,
+            "barcode": st.session_state.temp_barcode
+        })
+        st.session_state.temp_tracking = ""
+        st.session_state.temp_barcode = ""
+        st.session_state.show_dialog_for = None 
+    st.rerun() 
 
-def acknowledge_error_and_reset_scanner():
-    """(ใหม่) เคลียร์ Error (User/Tracking ซ้ำ) และรีเซ็ตกล้อง"""
-    st.session_state.show_user_not_found_error = False
-    st.session_state.last_failed_user_scan = ""
-    st.session_state.show_duplicate_tracking_error = False
-    st.session_state.last_scanned_tracking = ""
-    
-    st.session_state.scanner_key = f"scanner_{uuid.uuid4()}"
-    st.session_state.last_scan_processed = ""
-
-def validate_and_lock_user(user_id_to_check):
-    """(ใหม่) ตรวจสอบ User ID กับ DB และล็อคค่าถ้าถูกต้อง"""
-    if not user_id_to_check:
-        return False
-        
-    try:
-        query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
-        params = {"user_id": user_id_to_check}
-        result_df = supabase_conn.query(query, params=params, ttl=60) 
-        
-        if not result_df.empty and result_df['count'][0] > 0:
-            st.session_state.current_user = user_id_to_check
-            st.success(f"User: {user_id_to_check} ถูกล็อคแล้ว")
-            st.session_state.show_user_not_found_error = False
-            return True
-        else:
-            st.session_state.show_user_not_found_error = True
-            st.session_state.last_failed_user_scan = user_id_to_check
-            return False
-            
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการตรวจสอบ User: {e}")
-        st.session_state.show_user_not_found_error = False 
-        return False
-
-# --- 🟢 (แก้ไข) เปลี่ยนวิธีบันทึกข้อมูลใน save_all_to_db ---
 def save_all_to_db():
-    """บันทึก Staging list ทั้งหมดลง Database"""
     if not st.session_state.staged_scans:
         st.warning("ไม่มีข้อมูลในรายการให้บันทึก")
         return
-    if not st.session_state.current_user:
-         st.error("ไม่พบชื่อผู้ใช้งาน! กรุณาป้อนชื่อผู้ใช้งาน")
-         return
-    if not st.session_state.temp_barcode:
-         st.error("ไม่พบ Barcode! (เกิดข้อผิดพลาด) กรุณาล้างและสแกนใหม่")
-         return
-    
     try:
         data_to_insert = []
         THAI_TZ = pytz.timezone("Asia/Bangkok")
@@ -180,179 +110,154 @@ def save_all_to_db():
             data_to_insert.append({
                 "user_id": st.session_state.current_user,
                 "tracking_code": item["tracking"],
-                "product_barcode": item["barcode"], 
+                "product_barcode": item["barcode"],
                 "created_at": current_time.replace(tzinfo=None) 
             })
         
         df_to_insert = pd.DataFrame(data_to_insert)
+        df_to_insert.to_sql(
+            "scans", 
+            con=supabase_conn.engine, 
+            if_exists="append", 
+            index=False
+        )
         
-        # --- (นี่คือการแก้ไข) ---
-        # ใช้ .session และ .commit() เพื่อบังคับการบันทึก
-        with supabase_conn.session as session:
-            df_to_insert.to_sql(
-                "scans", 
-                con=session.connection(), # <-- เปลี่ยนจาก .engine เป็น .connection()
-                if_exists="append", 
-                index=False
-            )
-            session.commit() # <-- สั่ง Commit ธุรกรรม
-        # --- (สิ้นสุดการแก้ไข) ---
-
         saved_count = len(st.session_state.staged_scans)
-        st.session_state.scan_count += saved_count 
-        
+        st.session_state.scan_count += saved_count
+        st.session_state.staged_scans = []
+        st.session_state.current_user = "" 
         st.success(f"บันทึกข้อมูลทั้ง {saved_count} รายการ สำเร็จ!")
-        
-        # เรียกใช้ฟังก์ชันล้างค่า
-        clear_all_and_restart()
-        
+        st.rerun() 
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
+
+# --- Dialog Function (เหมือนเดิม) ---
+@st.dialog("✅ สแกนสำเร็จ")
+def show_confirmation_dialog(is_tracking):
+    code_type = "Tracking Number" if is_tracking else "Barcode สินค้า"
+    code_value = st.session_state.temp_tracking if is_tracking else st.session_state.temp_barcode
+    st.info(f"ยืนยัน {code_type} ที่สแกนได้:")
+    st.code(code_value)
+    if is_tracking:
+        st.warning("ขั้นต่อไป: กด 'ปิด' แล้วสแกน Barcode")
+        if st.button("ปิด (และเตรียมสแกน Barcode)"):
+            st.session_state.show_dialog_for = None
+            st.rerun()
+    else: # Barcode
+        st.success("Barcode ถูกสแกนและยืนยันแล้ว!")
+        st.warning("ข้อมูลจะถูกเพิ่มลงในรายการทันที")
+        if st.button("ปิด (และเพิ่มลงในรายการ)"):
+            add_and_clear_staging()
 
 # --- 4. แบ่งหน้าจอด้วย Tabs ---
 tab1, tab2 = st.tabs(["📷 สแกนกล่อง", "📊 ดูข้อมูลและดาวน์โหลด"])
 
-# --- TAB 1: หน้าสแกน (ปรับ Layout User/Barcode) ---
+# --- TAB 1: หน้าสแกน (ปรับ Layout) ---
 with tab1:
-    #st.header("บันทึกการสแกน") 
+    st.header("บันทึกการสแกน")
 
-    # --- ส่วนที่ 1: กล้องสแกน และ ข้อความแนะนำ (Dynamic) ---
-    scanner_prompt_placeholder = st.empty() 
-    scan_value = qrcode_scanner(key=st.session_state.scanner_key)
+    # --- 🟢 (แก้ไข) Logic แสดง "กล่อง Error" 🟢 ---
+    # เราจะแสดงกล่อง Error ถ้าธงเป็น True
+    # และจะไม่ล้างธง จนกว่าจะสแกน Barcode ถูก
+    if st.session_state.get("show_scan_error_message", False):
+        st.error("⚠️ สแกนซ้ำ! กรุณาสแกน Barcode", icon="⚠️")
+        # ❌ (ลบ) ลบบรรทัด st.session_state.show_scan_error_message = False ทิ้ง
+    # --- 🟢 สิ้นสุด 🟢 ---
 
-    # --- (ส่วนการคีย์ Manual - เหมือนเดิม) ---
-    if not st.session_state.current_user: 
-        with st.expander("คีย์ User ID (กรณีสแกนไม่ได้)"):
-            with st.form(key="manual_user_form"):
-                manual_user_id = st.text_input("ป้อน User ID:")
-                manual_user_submit = st.form_submit_button("ล็อค User")
-
-            if manual_user_submit:
-                if manual_user_id:
-                    if validate_and_lock_user(manual_user_id):
-                        st.session_state.last_scan_processed = manual_user_id 
-                        st.rerun() 
-                else:
-                    st.warning("กรุณาป้อน User ID")
-
-    # --- ส่วนที่ 2: Logic ประมวลผลการสแกน (เหมือนเดิม) ---
-    is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
-    
-    if is_new_scan:
-        st.session_state.last_scan_processed = scan_value 
-        
-        # 2A: State 1: ยังไม่มี User
-        if not st.session_state.current_user:
-            validate_and_lock_user(scan_value)
-
-        # 2B: State 2: มี User, ไม่มี Barcode
-        elif not st.session_state.temp_barcode:
-            st.session_state.show_user_not_found_error = False 
-            if scan_value == st.session_state.current_user:
-                st.warning("⚠️ นั่นคือ User! กรุณาสแกน Barcode สินค้า", icon="⚠️")
-            else:
-                st.session_state.temp_barcode = scan_value
-                st.success(f"Barcode: {scan_value} ถูกล็อคแล้ว")
-
-        # 2C: State 3: มี User และ Barcode
-        else:
-            st.session_state.show_user_not_found_error = False 
-            if scan_value == st.session_state.temp_barcode:
-                st.warning("⚠️ นั่นคือ Barcode เดิม! กรุณาสแกน Tracking Number", icon="⚠️")
-                st.session_state.show_duplicate_tracking_error = False
-            elif scan_value == st.session_state.current_user:
-                st.warning("⚠️ นั่นคือ User! กรุณาสแกน Tracking Number", icon="⚠️")
-                st.session_state.show_duplicate_tracking_error = False
-            elif any(item["tracking"] == scan_value for item in st.session_state.staged_scans):
-                st.session_state.show_duplicate_tracking_error = True
-                st.session_state.last_scanned_tracking = scan_value 
-            else:
-                st.session_state.staged_scans.append({
-                    "id": str(uuid.uuid4()),
-                    "tracking": scan_value,
-                    "barcode": st.session_state.temp_barcode 
-                })
-                st.session_state.show_duplicate_tracking_error = False
-                st.success(f"เพิ่ม Tracking: {scan_value} สำเร็จ!")
-
-    # --- ส่วนที่ 3: อัปเดตข้อความแนะนำ และ "ปุ่มเคลียร์" (เหมือนเดิม) ---
-    
-    has_sticky_error = st.session_state.show_user_not_found_error or st.session_state.show_duplicate_tracking_error
+    col_user, col_metric = st.columns([3, 2]) 
+    with col_user:
+        st.text_input("ชื่อผู้ใช้งาน (User):", key="current_user") 
+    with col_metric:
+        st.metric("กล่องใน DB (รอบนี้)", st.session_state.scan_count)
 
     if not st.session_state.current_user:
-        if st.session_state.show_user_not_found_error:
-            scanner_prompt_placeholder.error(f"⚠️ ไม่พบ User '{st.session_state.last_failed_user_scan}' ในระบบ! กรุณาสแกน User หรือคีย์ User ที่ถูกต้อง", icon="⚠️")
-        else:
-            scanner_prompt_placeholder.info("ขั้นตอนที่ 1: สแกน 'ชื่อผู้ใช้งาน' (หรือคีย์ด้านล่าง)")
-        
-    elif not st.session_state.temp_barcode:
-        scanner_prompt_placeholder.info("ขั้นตอนที่ 2: สแกน Barcode สินค้า...")
+        st.warning("ป้อนชื่อผู้ใช้งานก่อนเริ่มสแกน")
     else:
-        if st.session_state.show_duplicate_tracking_error:
-            scanner_prompt_placeholder.error(f"⚠️ สแกนซ้ำ! '{st.session_state.last_scanned_tracking}' มีในรายการแล้ว กรุณาสแกน Tracking ถัดไป...", icon="⚠️")
-        else:
-            scanner_prompt_placeholder.info("ขั้นตอนที่ 3: สแกน Tracking Number ทีละกล่อง...")
-
-    if has_sticky_error:
-        st.button("❌ ปิดแจ้งเตือน (และสแกนใหม่)", 
-                  on_click=acknowledge_error_and_reset_scanner, 
-                  use_container_width=True,
-                  type="primary") 
-                  
-    # --- 🟢 (แก้ไข) ส่วนที่ 4: แสดงผล (Display Area) - ใช้ Columns ---
-    st.divider()
-    
-    col_user, col_barcode = st.columns(2)
-    
-    with col_user:
-        st.subheader("1.User")
-        if st.session_state.current_user:
-            st.code(st.session_state.current_user)
-            # (เพิ่ม use_container_width=True ให้ปุ่มเต็มกล่อง)
-            st.button("❌ เปลี่ยน User (และเริ่มใหม่)", on_click=clear_all_and_restart, use_container_width=True) 
-        else:
-            st.info("...รอล็อค User...")
-    
-    with col_barcode:
-        st.subheader("2.Barcode")
-        if st.session_state.current_user:
-            if st.session_state.temp_barcode:
-                st.code(st.session_state.temp_barcode)
+        
+        if st.session_state.show_dialog_for == 'tracking':
+             show_confirmation_dialog(is_tracking=True)
+        elif st.session_state.show_dialog_for == 'barcode':
+             show_confirmation_dialog(is_tracking=False)
+             
+        st.subheader("1. สแกนที่นี่ (Scan Here)")
+        
+        if st.session_state.show_dialog_for is None:
+            if not st.session_state.temp_tracking:
+                st.info("ขั้นตอนที่ 1: สแกน Tracking...")
+            elif not st.session_state.temp_barcode:
+                 # (ปรับ) ถ้ามี Error ให้แสดง Info แทน Success
+                 if not st.session_state.show_scan_error_message:
+                     st.success("ขั้นตอนที่ 2: สแกน Barcode...")
             else:
-                st.info("...รอล็อค Barcode...")
-        else:
-            st.info("...รอ User ก่อน...") # (Placeholder เพื่อจัด Layout)
-    
-    # --- ส่วนที่ 5: ปุ่มบันทึก และ รายการที่กำลังสแกน ---
-    # (จะแสดงส่วนนี้ต่อเมื่อมี User แล้ว)
-    if st.session_state.current_user:
-        st.divider() # (ย้าย Divider มาไว้ตรงนี้)
+                 st.success("สำเร็จ! เริ่มสแกน Tracking กล่องถัดไป")
+                 st.session_state.temp_tracking = "" 
+                 st.rerun() 
 
-        st.button("💾 บันทึกทั้งหมด (และเริ่มใหม่)",
+            scan_value = qrcode_scanner(key="main_scanner")
+
+            if scan_value:
+                # Logic 1: สแกน Tracking
+                if not st.session_state.temp_tracking:
+                    st.session_state.temp_tracking = scan_value
+                    st.session_state.show_dialog_for = 'tracking' 
+                    st.rerun() 
+                
+                # Logic 2: สแกน Barcode
+                elif st.session_state.temp_tracking and not st.session_state.temp_barcode:
+                    if scan_value != st.session_state.temp_tracking:
+                        # (ถูกต้อง) นี่คือ Barcode
+                        st.session_state.temp_barcode = scan_value
+                        st.session_state.show_dialog_for = 'barcode' 
+                        # --- 🟢 (แก้ไข) ล้างธง Error ที่นี่ 🟢 ---
+                        st.session_state.show_scan_error_message = False 
+                        st.rerun() 
+                    
+                    else:
+                        # (สแกนซ้ำ) นี่คือ Tracking เดิม
+                        st.session_state.show_scan_error_message = True # 1. ตั้งธง
+                        st.rerun() # 2. บังคับ rerun
+                        
+                elif st.session_state.temp_tracking and st.session_state.temp_barcode:
+                    st.warning("รอสักครู่ (ระบบกำลังเพิ่มรายการ) หรือเริ่มสแกน Tracking ถัดไปได้เลย")
+        else:
+            st.info(f"... กด 'ปิด' ใน Popup ยืนยัน {st.session_state.show_dialog_for.capitalize()} ...")
+
+        st.subheader("2. ข้อมูลที่กำลังสแกน")
+        
+        col_t, col_b = st.columns(2)
+        with col_t:
+            st.text_input("Tracking", value=st.session_state.temp_tracking, 
+                          disabled=True, label_visibility="collapsed")
+            st.caption("Tracking ที่สแกนได้") 
+        with col_b:
+            st.text_input("Barcode", value=st.session_state.temp_barcode, 
+                          disabled=True, label_visibility="collapsed")
+            st.caption("Barcode ที่สแกนได้") 
+        
+        st.divider()
+
+        # --- (ย้ายมา) ปุ่มบันทึกข้อมูล ---
+        st.button("💾 บันทึกทั้งหมด",
                   type="primary",
                   use_container_width=True,
                   on_click=save_all_to_db,
-                  disabled=(not st.session_state.staged_scans or not st.session_state.temp_barcode or not st.session_state.current_user)
+                  disabled=(not st.session_state.staged_scans)
                  )
 
+        # --- (ปรับ) ส่วนที่ 3: ตารางพักข้อมูล (Layout แบบ Card) ---
         st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
         
         if not st.session_state.staged_scans:
-            if st.session_state.temp_barcode:
-                st.info(f"ยังไม่มีรายการสแกน... (Barcode ที่ใช้คือ: {st.session_state.temp_barcode})")
-            elif st.session_state.current_user:
-                st.info(f"ยังไม่มีรายการสแกน... (User คือ: {st.session_state.current_user})")
-            else:
-                 st.info("ยังไม่มีรายการสแกน...")
+            st.info("ยังไม่มีรายการสแกน สแกน Tracking และ Barcode")
         else:
             for item in reversed(st.session_state.staged_scans): 
                 with st.container(border=True):
-                    st.caption(f"Barcode: {item['barcode']}")
                     st.caption("Tracking:")
-                    
-                    col_code, col_del = st.columns([4, 1]) 
-                    with col_code:
-                        st.code(item["tracking"]) 
+                    st.code(item["tracking"])
+                    st.caption("Barcode:")
+                    col_b, col_del = st.columns([4, 1]) 
+                    with col_b:
+                        st.code(item["barcode"])
                     with col_del:
                         st.button("❌ ลบ", 
                                   key=f"del_{item['id']}", 
@@ -361,227 +266,40 @@ with tab1:
                                   use_container_width=True
                                  )
 
-# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (แก้ไข Format CSV) ---
+# --- TAB 2: หน้าดูข้อมูลและดาวน์โหลด (เหมือนเดิม) ---
 with tab2:
-    st.header("จัดการข้อมูล User")
-
-    # --- (ส่วนที่ 1: Form จัดการ User - เหมือนเดิม) ---
-    @st.cache_data(ttl=60) 
-    def get_all_users():
-        try:
-            query = 'SELECT user_id, "Employee_Name", "Employee_Surname" FROM user_data ORDER BY user_id'
-            df = supabase_conn.query(query)
-            return df
-        except Exception as e:
-            st.error(f"ไม่สามารถดึงข้อมูล User: {e}")
-            return pd.DataFrame(columns=["user_id", "Employee_Name", "Employee_Surname"])
-
-    user_df = get_all_users()
-    
-    user_df["Employee_Name"] = user_df["Employee_Name"].fillna("").astype(str)
-    user_df["Employee_Surname"] = user_df["Employee_Surname"].fillna("").astype(str)
-    
-    user_id_list = ["(เลือก User เพื่อ แก้ไข/ลบ)", "--- เพิ่ม User ใหม่ ---"] + user_df["user_id"].tolist()
-
-    def clear_user_form():
-        st.session_state.selected_user_to_edit = "(เลือก User เพื่อ แก้ไข/ลบ)"
-        st.session_state.user_id_input = ""
-        st.session_state.emp_name_input = ""
-        st.session_state.emp_surname_input = ""
-
-    def on_user_select():
-        selected_id = st.session_state.selected_user_to_edit
-        
-        if selected_id == "--- เพิ่ม User ใหม่ ---":
-            st.session_state.user_id_input = ""
-            st.session_state.emp_name_input = ""
-            st.session_state.emp_surname_input = ""
-        elif selected_id != "(เลือก User เพื่อ แก้ไข/ลบ)":
-            user_data = user_df[user_df["user_id"] == selected_id].iloc[0]
-            st.session_state.user_id_input = user_data["user_id"]
-            st.session_state.emp_name_input = user_data["Employee_Name"]
-            st.session_state.emp_surname_input = user_data["Employee_Surname"]
-        else:
-            st.session_state.user_id_input = ""
-            st.session_state.emp_name_input = ""
-            st.session_state.emp_surname_input = ""
-
-    with st.expander("คลิกเพื่อเปิดฟอร์ม จัดการ User", expanded=False):
-        
-        st.selectbox(
-            "เลือก User (เพื่อ แก้ไข/ลบ) หรือเลือก 'เพิ่ม User ใหม่'",
-            options=user_id_list,
-            key="selected_user_to_edit",
-            on_change=on_user_select
-        )
-
-        with st.form(key="user_management_form"):
-            
-            is_new_mode = st.session_state.selected_user_to_edit == "--- เพิ่ม User ใหม่ ---"
-            
-            user_id = st.text_input("User ID (จำเป็น)", key="user_id_input", disabled=(not is_new_mode))
-            emp_name = st.text_input("Employee Name (ชื่อจริง)", key="emp_name_input")
-            emp_surname = st.text_input("Employee Surname (นามสกุล)", key="emp_surname_input")
-
-            col_b1, col_b2, col_b3 = st.columns([2, 2, 1])
-
-            with col_b1:
-                save_label = "💾 บันทึก User ใหม่" if is_new_mode else "💾 อัปเดต User"
-                save_button = st.form_submit_button(save_label, use_container_width=True)
-            
-            with col_b2:
-                delete_button = st.form_submit_button("❌ ลบ User นี้", use_container_width=True, disabled=is_new_mode)
-            
-            with col_b3:
-                st.form_submit_button("🆕", on_click=clear_user_form, use_container_width=True, help="ล้างฟอร์มและเริ่มใหม่")
-
-            if save_button:
-                if not user_id:
-                    st.error("กรุณาป้อน User ID")
-                else:
-                    try:
-                        with supabase_conn.session as session:
-                            if is_new_mode:
-                                check_query = "SELECT COUNT(1) as count FROM user_data WHERE user_id = :user_id"
-                                check_df = supabase_conn.query(check_query, params={"user_id": user_id}, ttl=5)
-                                if not check_df.empty and check_df['count'][0] > 0:
-                                    st.error(f"⚠️ User ID '{user_id}' นี้มีในระบบแล้ว! ไม่สามารถเพิ่มซ้ำได้")
-                                else:
-                                    insert_query = text("""
-                                        INSERT INTO user_data (user_id, "Employee_Name", "Employee_Surname")
-                                        VALUES (:user_id, :name, :surname)
-                                    """)
-                                    session.execute(insert_query, {"user_id": user_id, "name": emp_name, "surname": emp_surname})
-                                    session.commit()
-                                    st.success(f"บันทึก User '{user_id}' สำเร็จ!")
-                                    st.cache_data.clear() 
-                                    st.rerun() 
-                            else:
-                                update_query = text("""
-                                    UPDATE user_data
-                                    SET "Employee_Name" = :name, "Employee_Surname" = :surname
-                                    WHERE user_id = :user_id
-                                """)
-                                session.execute(update_query, {"user_id": user_id, "name": emp_name, "surname": emp_surname})
-                                session.commit()
-                                st.success(f"อัปเดต User '{user_id}' สำเร็จ!")
-                                st.cache_data.clear()
-                                st.rerun()
-                                
-                    except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาด: {e}")
-
-            if delete_button:
-                if not user_id:
-                    st.error("ไม่ได้เลือก User ที่จะลบ")
-                else:
-                    try:
-                        with supabase_conn.session as session:
-                            delete_query = text("DELETE FROM user_data WHERE user_id = :user_id")
-                            session.execute(delete_query, {"user_id": user_id})
-                            session.commit()
-                            st.warning(f"ลบ User '{user_id}' ออกจากระบบแล้ว!")
-                            st.cache_data.clear()
-                            st.rerun() 
-                            
-                    except Exception as e:
-                        st.error(f"เกิดข้อผิดพลาดในการลบ: {e}")
-    # --- (สิ้นสุด Form จัดการ User) ---
-
-    st.divider() 
-    
-    # --- (ส่วนที่ 2: ค้นหาข้อมูลที่สแกนแล้ว) ---
-    st.header("ค้นหาข้อมูลที่สแกนแล้ว")
-    
-    show_error = False 
+    st.header("ค้นหาและดาวน์โหลดข้อมูล")
     
     with st.expander("ตัวกรองข้อมูล (Filter)", expanded=True):
         col_f1, col_col2 = st.columns(2)
         with col_f1:
             filter_user = st.text_input("กรองตาม User (เว้นว่างเพื่อแสดงทั้งหมด)")
-        
         with col_col2:
-            sub_col1, sub_col2 = st.columns(2)
-            with sub_col1:
-                start_date = st.date_input("From (จากวันที่)", value=None)
-            with sub_col2:
-                end_date = st.date_input("To (ถึงวันที่)", value=None)
-        
-        if start_date and end_date and start_date > end_date:
-            st.error("วันที่เริ่มต้น (From) ต้องมาก่อนวันที่สิ้นสุด (To)")
-            show_error = True 
-
-    st.metric("กล่องที่บันทึกไปแล้ว (รอบนี้)", st.session_state.scan_count)
-    st.divider()
-
+            filter_date = st.date_input("กรองตามวันที่", value=None) 
     try:
-        # (Query ที่ดึงข้อมูล JOIN - เหมือนเดิม)
-        query = """
-            SELECT 
-                s.id, 
-                s.created_at, 
-                s.user_id, 
-                CONCAT_WS(' ', u."Employee_Name", u."Employee_Surname") AS "ชื่อ นามสกุล",
-                s.tracking_code, 
-                s.product_barcode
-            FROM 
-                scans s
-            LEFT JOIN 
-                user_data u ON s.user_id = u.user_id
-        """
-        
+        query = "SELECT * FROM scans"
         filters = []
         params = {}
-        
         if filter_user:
-            filters.append("s.user_id = :user")
+            filters.append("user_id = :user")
             params["user"] = filter_user
-        
-        if not show_error: 
-            if start_date and end_date:
-                filters.append("DATE(s.created_at AT TIME ZONE 'Asia/Bangkok') BETWEEN :start AND :end")
-                params["start"] = start_date
-                params["end"] = end_date
-            elif start_date:
-                filters.append("DATE(s.created_at AT TIME ZONE 'Asia/Bangkok') >= :start")
-                params["start"] = start_date
-            elif end_date:
-                filters.append("DATE(s.created_at AT TIME ZONE 'Asia/Bangkok') <= :end")
-                params["end"] = end_date
+        if filter_date:
+            filters.append("DATE(created_at AT TIME ZONE 'Asia/Bangkok') = :date")
+            params["date"] = filter_date
             
         if filters:
             query += " WHERE " + " AND ".join(filters)
         
-        query += " ORDER BY s.created_at DESC"
-        
-        if show_error:
-            data_df = pd.DataFrame() 
-        else:
-            data_df = supabase_conn.query(query, params=params)
+        query += " ORDER BY created_at DESC"
+        data_df = supabase_conn.query(query, params=params)
         
         if not data_df.empty:
-            # 1. แสดงผลบนหน้าจอ (ใช้ข้อมูลดิบ)
             st.dataframe(data_df, use_container_width=True)
-            
-            # --- 🟢 (START EDIT) ---
-            # 2. สร้าง DataFrame "สำหรับดาวน์โหลด"
-            df_for_csv = data_df.copy()
-            
-            # 3. แก้ไข Format วันที่
-            # (แปลงเป็น datetime object ก่อน แล้วค่อย format)
-            df_for_csv['created_at'] = pd.to_datetime(df_for_csv['created_at']).dt.strftime('%d-%m-%Y %H:%M')
-            
-            # 4. แก้ไข Barcode (บังคับให้ Excel แสดงเป็น Text)
-            # (ใส่ ="..." เพื่อให้ Excel รู้ว่าเป็น String)
-            df_for_csv['product_barcode'] = df_for_csv['product_barcode'].apply(lambda x: f'="{x}"' if pd.notna(x) and x != "" else "")
-            # --- 🟢 (END EDIT) ---
-
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
                 return df_to_convert.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             
-            # 5. ส่ง DataFrame ที่แปลงค่าแล้ว ไปสร้าง CSV
-            csv_data = convert_df_to_csv(df_for_csv)
+            csv_data = convert_df_to_csv(data_df)
             
             st.download_button(
                 label="📥 Download ข้อมูลเป็น CSV",
@@ -590,8 +308,6 @@ with tab2:
                 mime="text/csv",
             )
         else:
-            if not show_error:
-                st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
-            
+            st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+        st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
