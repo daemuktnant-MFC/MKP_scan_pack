@@ -427,7 +427,7 @@ with tab1:
                       use_container_width=True,
                       on_click=save_all_to_db,
                       disabled=(not st.session_state.staged_scans or not st.session_state.temp_barcode or not st.session_state.current_user)
-                      )
+                     )
 
             st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
             if not st.session_state.staged_scans:
@@ -524,7 +524,7 @@ with tab1:
                       use_container_width=True,
                       on_click=save_all_to_db,
                       disabled=(not st.session_state.staged_scans)
-                      )
+                     )
 
             st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
             
@@ -592,8 +592,7 @@ with tab2:
             st.session_state.emp_name_input = ""
             st.session_state.emp_surname_input = ""
 
-    # --- 🟢 (แก้ไข) ใช้ expanded=True เพื่อให้ฟอร์มเปิดค้างไว้ ---
-    with st.expander("คลิกเพื่อเปิดฟอร์ม จัดการ User", expanded=True):
+    with st.expander("คลิกเพื่อเปิดฟอร์ม จัดการ User", expanded=False):
         
         st.selectbox(
             "เลือก User (เพื่อ แก้ไข/ลบ) หรือเลือก 'เพิ่ม User ใหม่'",
@@ -642,7 +641,7 @@ with tab2:
                                     session.commit()
                                     st.success(f"บันทึก User '{user_id}' สำเร็จ!")
                                     st.cache_data.clear() 
-                                    st.rerun() 
+                                    #st.rerun() 
                             else:
                                 update_query = text("""
                                     UPDATE user_data
@@ -653,7 +652,7 @@ with tab2:
                                 session.commit()
                                 st.success(f"อัปเดต User '{user_id}' สำเร็จ!")
                                 st.cache_data.clear()
-                                st.rerun()
+                                #st.rerun()
                                 
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาด: {e}")
