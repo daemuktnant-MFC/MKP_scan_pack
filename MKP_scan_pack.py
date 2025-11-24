@@ -751,7 +751,7 @@ with tab2:
                                     st.write(err)
                         
                         st.cache_data.clear()
-                        # st.rerun() # ถ้าอยากให้รีเฟรชทันทีเปิดบรรทัดนี้
+                        st.rerun() # ถ้าอยากให้รีเฟรชทันทีเปิดบรรทัดนี้
 
             except Exception as e:
                 st.error(f"อ่านไฟล์ผิดพลาด: {e}")
