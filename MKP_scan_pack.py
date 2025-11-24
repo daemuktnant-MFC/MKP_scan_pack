@@ -591,8 +591,8 @@ with tab2:
             st.session_state.user_id_input = ""
             st.session_state.emp_name_input = ""
             st.session_state.emp_surname_input = ""
-
-    with st.expander("คลิกเพื่อเปิดฟอร์ม จัดการ User", expanded=False):
+    # === 🟢 1.1 ส่วนจัดการทีละคน (Manual) ===
+    with st.expander("📝 จัดการ User ทีละคน (เพิ่ม/แก้ไข/ลบ)", expanded=False): # (หุบไว้ก่อน เพื่อให้ไม่รก)
         
         st.selectbox(
             "เลือก User (เพื่อ แก้ไข/ลบ) หรือเลือก 'เพิ่ม User ใหม่'",
@@ -672,6 +672,90 @@ with tab2:
                             
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาดในการลบ: {e}")
+
+        # === 🟢 1.2 ส่วน Upload File (Excel/CSV) - เพิ่มใหม่ ===
+    with st.expander("📂 Upload Users (Excel/CSV) เพื่อเพิ่มทีละหลายคน", expanded=True):
+        st.info("💡 ไฟล์ต้องมีหัวตาราง: **user_id**, **name**, **surname** (ระบบจะเช็ค User ID ซ้ำให้)")
+        
+        uploaded_file = st.file_uploader("เลือกไฟล์ Excel หรือ CSV", type=['xlsx', 'xls', 'csv'])
+        
+        if uploaded_file is not None:
+            try:
+                # อ่านไฟล์
+                if uploaded_file.name.endswith('.csv'):
+                    df_upload = pd.read_csv(uploaded_file)
+                else:
+                    df_upload = pd.read_excel(uploaded_file)
+                
+                # ปรับหัวตารางให้เป็นตัวพิมพ์เล็กเพื่อเช็คง่ายๆ
+                df_upload.columns = df_upload.columns.str.lower().str.strip()
+                
+                # เช็คว่ามี col ที่ต้องใช้ไหม
+                required_cols = {'user_id'} # name, surname ไม่บังคับก็ได้ (ใส่ว่างได้)
+                if not required_cols.issubset(df_upload.columns):
+                    st.error(f"❌ ไฟล์ไม่ถูกต้อง! ต้องมีคอลัมน์: {required_cols}")
+                    st.write("คอลัมน์ที่พบ:", list(df_upload.columns))
+                else:
+                    st.write(f"พบข้อมูล {len(df_upload)} แถว เตรียมนำเข้า...")
+                    
+                    if st.button("🚀 ยืนยันการนำเข้าข้อมูล"):
+                        success_count = 0
+                        skip_count = 0
+                        error_log = []
+
+                        progress_bar = st.progress(0)
+                        
+                        with supabase_conn.session as session:
+                            for index, row in df_upload.iterrows():
+                                # เตรียมข้อมูล
+                                uid = str(row['user_id']).strip()
+                                # หาชื่อ/นามสกุล (ถ้าไม่มีให้เป็นค่าว่าง)
+                                uname = str(row['name']).strip() if 'name' in row and pd.notna(row['name']) else ""
+                                usurname = str(row['surname']).strip() if 'surname' in row and pd.notna(row['surname']) else ""
+                                
+                                if not uid or uid.lower() == 'nan': 
+                                    continue # ข้ามแถวว่าง
+
+                                try:
+                                    # 1. เช็คซ้ำ
+                                    check_query = text('SELECT 1 FROM user_data WHERE user_id = :uid')
+                                    exists = session.execute(check_query, {"uid": uid}).fetchone()
+                                    
+                                    if exists:
+                                        skip_count += 1
+                                    else:
+                                        # 2. Insert
+                                        ins_query = text("""
+                                            INSERT INTO user_data (user_id, "Employee_Name", "Employee_Surname")
+                                            VALUES (:uid, :uname, :usurname)
+                                        """)
+                                        session.execute(ins_query, {"uid": uid, "uname": uname, "usurname": usurname})
+                                        success_count += 1
+                                        
+                                except Exception as e:
+                                    error_log.append(f"Row {index+1} (ID {uid}): {e}")
+                                
+                                # Update Progress
+                                progress_bar.progress((index + 1) / len(df_upload))
+
+                            session.commit()
+                        
+                        # สรุปผล
+                        st.success(f"✅ นำเข้าสำเร็จ: {success_count} คน")
+                        if skip_count > 0:
+                            st.warning(f"⚠️ ข้าม (มีอยู่แล้ว): {skip_count} คน")
+                        if error_log:
+                            st.error(f"❌ เกิดข้อผิดพลาด {len(error_log)} รายการ")
+                            with st.expander("ดู Error Log"):
+                                for err in error_log:
+                                    st.write(err)
+                        
+                        st.cache_data.clear()
+                        # st.rerun() # ถ้าอยากให้รีเฟรชทันทีเปิดบรรทัดนี้
+
+            except Exception as e:
+                st.error(f"อ่านไฟล์ผิดพลาด: {e}")
+
     # --- (สิ้นสุด Form จัดการ User) ---
 
     st.divider() 
