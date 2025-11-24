@@ -677,6 +677,31 @@ with tab2:
         # === 🟢 1.2 ส่วน Upload File (Excel/CSV) - เพิ่มใหม่ ===
     with st.expander("📂 Upload Users (Excel/CSV) เพื่อเพิ่มทีละหลายคน", expanded=True):
         st.info("💡 ไฟล์ต้องมีหัวตาราง: **user_id**, **name**, **surname** (ระบบจะเช็ค User ID ซ้ำให้)")
+
+        # --- 🔵 (ใหม่) ปุ่ม Download Template 🔵 ---
+        col_dl, col_up = st.columns([1, 2], gap="small")
+        with col_dl:
+            # สร้าง Template DataFrame
+            template_data = pd.DataFrame([
+                {"user_id": "EMP001", "name": "สมชาย", "surname": "ใจดี"},
+                {"user_id": "EMP002", "name": "สมหญิง", "surname": "รักงาน"}
+            ])
+            
+            @st.cache_data
+            def convert_df_to_csv_template(df):
+                return df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+
+            csv_template = convert_df_to_csv_template(template_data)
+            
+            st.download_button(
+                label="📥 โหลดแบบฟอร์ม (Template)",
+                data=csv_template,
+                file_name="user_upload_template.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="คลิกเพื่อโหลดไฟล์ตัวอย่าง .csv สำหรับนำไปกรอกข้อมูล"
+            )
+        # ---------------------------------------------
         
         uploaded_file = st.file_uploader("เลือกไฟล์ Excel หรือ CSV", type=['xlsx', 'xls', 'csv'])
         
