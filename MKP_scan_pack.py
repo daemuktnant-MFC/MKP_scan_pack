@@ -591,6 +591,7 @@ with tab2:
             st.session_state.user_id_input = ""
             st.session_state.emp_name_input = ""
             st.session_state.emp_surname_input = ""
+            
     # === 🟢 1.1 ส่วนจัดการทีละคน (Manual) ===
     with st.expander("📝 จัดการ User ทีละคน (เพิ่ม/แก้ไข/ลบ)", expanded=False): # (หุบไว้ก่อน เพื่อให้ไม่รก)
         
