@@ -8,7 +8,7 @@ import pytz
 from sqlalchemy import text
 import numpy as np
 
-# --- (CSS สำหรับ Mobile Layout - เหมือนเดิม) ---
+# --- (CSS สำหรับ Mobile Layout) ---
 st.markdown("""
 <style>
 /* 1. Base Layout */
@@ -65,6 +65,28 @@ def init_supabase_connection():
     return st.connection("supabase", type=SQLConnection)
 
 supabase_conn = init_supabase_connection()
+
+# --- 🟢 (ใหม่) สร้างเฉพาะตาราง scans (user_data มีแล้ว) 🟢 ---
+def initialize_database():
+    try:
+        with supabase_conn.engine.connect() as conn:
+            # สร้างตาราง scans ถ้ายังไม่มี
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS scans (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT,
+                    tracking_code TEXT,
+                    product_barcode TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+            """))
+            conn.commit()
+    except Exception as e:
+        st.error(f"DB Init Error: {e}")
+
+initialize_database()
+# --- 🟢 สิ้นสุดส่วนแก้ไข 🟢 ---
+
 
 # --- 2. สร้าง Session State ---
 if "current_user" not in st.session_state:
@@ -165,22 +187,22 @@ with tab1:
     if st.session_state.get("show_scan_error_message", False):
         st.error("⚠️ สแกนซ้ำ! กรุณาสแกน Tracking", icon="⚠️")
 
-    # ส่วนเลือก User (Dropdown จาก DB)
+    # 🟢 แก้ไข: ดึงข้อมูลจาก user_data (ใช้ "Name")
     try:
-        users_df = supabase_conn.query("SELECT * FROM users ORDER BY name", ttl=0)
-        user_options = users_df['name'].tolist() if not users_df.empty else []
-    except:
+        users_df = supabase_conn.query('SELECT * FROM user_data ORDER BY "Name"', ttl=0)
+        # ตรวจสอบชื่อคอลัมน์ให้ตรงกับ DB (Name ตัวใหญ่)
+        user_options = users_df['Name'].tolist() if not users_df.empty else []
+    except Exception as e:
         user_options = []
+        # st.error(f"DB Load Error: {e}") 
     
     col_user, col_metric = st.columns([3, 2]) 
     with col_user:
-        # ใช้ Selectbox แทน Text Input เดิม
         selected_scan_user = st.selectbox(
             "ชื่อผู้ใช้งาน (User):", 
             [""] + user_options,
             key="scan_page_user_select"
         )
-        # อัปเดต current_user จากการเลือก
         if selected_scan_user:
             st.session_state.current_user = selected_scan_user
 
@@ -190,7 +212,7 @@ with tab1:
     if not st.session_state.current_user:
         st.warning("เลือกชื่อผู้ใช้งานก่อนเริ่มสแกน")
     else:
-        # Logic การสแกน (เหมือนเดิม)
+        # Logic การสแกน
         if st.session_state.show_dialog_for == 'tracking':
              show_confirmation_dialog(is_tracking=True)
         elif st.session_state.show_dialog_for == 'barcode':
@@ -257,45 +279,44 @@ with tab1:
                     with col_del:
                         st.button("❌", key=f"del_{item['id']}", on_click=delete_item, args=(item['id'],), use_container_width=True)
 
-# --- TAB 2: จัดการ User และ ดูข้อมูล (แก้ไขตามที่ขอ) ---
+# --- TAB 2: จัดการ User และ ดูข้อมูล ---
 with tab2:
     st.header("จัดการข้อมูล User")
     
-    # 1. ส่วนเพิ่ม/แก้ไข User
     with st.container(border=True):
         st.subheader("เพิ่ม / แก้ไข User")
         
-        # ดึงข้อมูล User ล่าสุด
+        # 🟢 แก้ไข: ใช้ user_data และคอลัมน์ "Name"
         try:
-            users_df = supabase_conn.query("SELECT * FROM users ORDER BY name", ttl=0)
-            all_users_list = users_df['name'].tolist() if not users_df.empty else []
+            users_df = supabase_conn.query('SELECT * FROM user_data ORDER BY "Name"', ttl=0)
+            all_users_list = users_df['Name'].tolist() if not users_df.empty else []
         except:
             all_users_list = []
-            st.error("ไม่สามารถเชื่อมต่อตาราง users ได้")
 
-        # กล่องเลือก User (Search Box)
         search_options = ["---เพิ่ม User ใหม่---"] + all_users_list
         selected_manage_user = st.selectbox("ค้นหา/แก้ไข User:", search_options, key="manage_user_select")
 
-        # --- 🟢 แก้ไขจุดที่ 1: การเพิ่ม User ใหม่ ---
         if selected_manage_user == "---เพิ่ม User ใหม่---":
-            # ใช้ expanded=True เพื่อให้เปิดตลอด
             with st.expander("กรอกข้อมูล User ใหม่", expanded=True):
                 with st.form("add_user_form"):
                     new_name = st.text_input("ชื่อ-สกุล (Name):")
-                    new_emp_id = st.text_input("รหัสพนักงาน (ID):")
+                    new_emp_id = st.text_input("รหัสพนักงาน (Employee ID):")
                     submitted_add = st.form_submit_button("บันทึก User ใหม่", type="primary")
                     
                     if submitted_add:
                         if new_name and new_emp_id:
                             try:
-                                # เช็คซ้ำ
-                                check_dup = users_df[users_df['name'] == new_name] if not users_df.empty else pd.DataFrame()
+                                # เช็คชื่อซ้ำโดยใช้ "Name"
+                                check_dup = users_df[users_df['Name'] == new_name] if not users_df.empty else pd.DataFrame()
                                 if not check_dup.empty:
                                     st.error("ชื่อนี้มีอยู่ในระบบแล้ว")
                                 else:
-                                    new_user_data = pd.DataFrame([{"name": new_name, "employee_id": new_emp_id}])
-                                    new_user_data.to_sql("users", con=supabase_conn.engine, if_exists="append", index=False)
+                                    # 🟢 แก้ไข: Insert ลง user_data คอลัมน์ "Name", "Employee_ID"
+                                    with supabase_conn.engine.connect() as conn:
+                                        stmt = text('INSERT INTO user_data ("Name", "Employee_ID") VALUES (:n, :e)')
+                                        conn.execute(stmt, {"n": new_name, "e": new_emp_id})
+                                        conn.commit()
+                                        
                                     st.success(f"เพิ่ม User: {new_name} สำเร็จ!")
                                     st.rerun()
                             except Exception as e:
@@ -303,16 +324,14 @@ with tab2:
                         else:
                             st.warning("กรุณากรอกข้อมูลให้ครบ")
 
-        # --- 🟢 แก้ไขจุดที่ 2: การแก้ไข User เดิม ---
         elif selected_manage_user:
-            # ดึงข้อมูลของ User ที่เลือก
-            current_data = users_df[users_df['name'] == selected_manage_user].iloc[0]
+            # 🟢 แก้ไข: ดึงข้อมูลจากคอลัมน์ "Name", "Employee_ID"
+            current_data = users_df[users_df['Name'] == selected_manage_user].iloc[0]
             
-            # 🟢 FIX: ใช้ expanded=True เพื่อให้กล่องไม่หุบเมื่อเลือกชื่อ
             with st.expander(f"แก้ไขข้อมูล: {selected_manage_user}", expanded=True):
                 with st.form("edit_user_form"):
-                    edit_name = st.text_input("แก้ไขชื่อ-สกุล:", value=current_data['name'])
-                    edit_emp_id = st.text_input("แก้ไขรหัสพนักงาน:", value=current_data['employee_id'])
+                    edit_name = st.text_input("แก้ไขชื่อ-สกุล:", value=current_data['Name'])
+                    edit_emp_id = st.text_input("แก้ไขรหัสพนักงาน:", value=current_data['Employee_ID'])
                     
                     c1, c2 = st.columns(2)
                     with c1:
@@ -322,9 +341,9 @@ with tab2:
 
                     if submitted_edit:
                         try:
-                            # Update โดยใช้ SQLAlchemy text
+                            # 🟢 แก้ไข: Update user_data
                             with supabase_conn.engine.connect() as conn:
-                                stmt = text("UPDATE users SET name=:n, employee_id=:e WHERE id=:id")
+                                stmt = text('UPDATE user_data SET "Name"=:n, "Employee_ID"=:e WHERE id=:id')
                                 conn.execute(stmt, {"n": edit_name, "e": edit_emp_id, "id": current_data['id']})
                                 conn.commit()
                             st.success("แก้ไขข้อมูลสำเร็จ!")
@@ -334,8 +353,9 @@ with tab2:
                     
                     if submitted_delete:
                         try:
+                            # 🟢 แก้ไข: Delete from user_data
                             with supabase_conn.engine.connect() as conn:
-                                stmt = text("DELETE FROM users WHERE id=:id")
+                                stmt = text("DELETE FROM user_data WHERE id=:id")
                                 conn.execute(stmt, {"id": current_data['id']})
                                 conn.commit()
                             st.success(f"ลบ User {selected_manage_user} สำเร็จ!")
@@ -345,17 +365,14 @@ with tab2:
 
     st.divider()
 
-    # 2. ส่วนดูข้อมูล Scan (History)
     st.subheader("ประวัติการสแกน (History)")
     with st.expander("ตัวกรองข้อมูล (Filter)", expanded=False):
         col_f1, col_col2 = st.columns(2)
         with col_f1:
-            # ใช้ Dropdown User ในการกรองด้วย
             filter_user = st.selectbox("กรองตาม User:", ["ทั้งหมด"] + all_users_list)
         with col_col2:
             filter_date = st.date_input("กรองตามวันที่", value=None) 
             
-    # Query Data
     try:
         query = "SELECT * FROM scans"
         filters = []
@@ -378,11 +395,10 @@ with tab2:
         if not data_df.empty:
             st.dataframe(data_df, use_container_width=True)
             
-            # CSV Download
             df_for_csv = data_df.copy()
-            # จัด Format วันที่ให้สวยงามใน CSV
             try:
                 df_for_csv['created_at'] = pd.to_datetime(df_for_csv['created_at']).dt.strftime('%d-%m-%Y %H:%M')
+                df_for_csv['product_barcode'] = df_for_csv['product_barcode'].apply(lambda x: f'="{x}"' if pd.notna(x) and x != "" else "")
             except:
                 pass
 
