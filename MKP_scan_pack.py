@@ -668,7 +668,7 @@ with tab2:
                             session.commit()
                             st.warning(f"ลบ User '{user_id}' ออกจากระบบแล้ว!")
                             st.cache_data.clear()
-                            st.rerun() 
+                            #st.rerun() 
                             
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาดในการลบ: {e}")
