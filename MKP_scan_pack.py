@@ -202,7 +202,7 @@ def validate_and_lock_user(user_id_to_check):
         st.session_state.show_user_not_found_error = False 
         return False
 
-# --- 🟢 (ใหม่) ฟังก์ชันเช็ค Tracking ซ้ำใน DB ---
+# --- ฟังก์ชันเช็ค Tracking ซ้ำใน DB ---
 def check_tracking_exists(tracking_code):
     """เช็คว่า Tracking นี้มีอยู่ในตาราง scans หรือยัง"""
     if not tracking_code:
@@ -335,11 +335,17 @@ with tab1:
 
             if manual_user_submit:
                 if manual_user_id:
+                    # 🟢 แก้ไข: ใส่ strip() ให้ Manual Input ด้วย
+                    manual_user_id = manual_user_id.strip()
                     if validate_and_lock_user(manual_user_id):
                         st.session_state.last_scan_processed = manual_user_id 
                         st.rerun() 
                 else:
                     st.warning("กรุณาป้อน User ID")
+
+        # 🟢 แก้ไข 1: Clean ค่า Scan Value ทันที
+        if scan_value:
+             scan_value = str(scan_value).strip()
 
         is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
         if is_new_scan:
@@ -364,6 +370,10 @@ with tab1:
             
             st.button("🔙 กลับ Menu หลัก", on_click=clear_all_and_restart, key="back_menu_bulk")
 
+            # 🟢 แก้ไข 2: Clean ค่า Scan Value ทันที (Bulk Mode)
+            if scan_value:
+                 scan_value = str(scan_value).strip()
+
             is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
             if is_new_scan:
                 st.session_state.last_scan_processed = scan_value 
@@ -386,12 +396,12 @@ with tab1:
                         st.warning("⚠️ นั่นคือ User! กรุณาสแกน Tracking Number", icon="⚠️")
                         st.session_state.show_duplicate_tracking_error = False
                     
-                    # --- 🟢 (Modified) Check Duplicate in Staging ---
+                    # --- 🟢 แก้ไข 3: Check ซ้ำในรายการ (มั่นใจว่า Clean ค่าแล้ว) ---
                     elif any(item["tracking"] == scan_value for item in st.session_state.staged_scans):
                         st.session_state.show_duplicate_tracking_error = True
                         st.session_state.last_scanned_tracking = scan_value 
                     
-                    # --- 🟢 (Modified) Check Duplicate in DB ---
+                    # --- Check ซ้ำใน DB ---
                     elif check_tracking_exists(scan_value):
                         st.session_state.show_duplicate_tracking_error = True
                         st.session_state.last_scanned_tracking = f"{scan_value} (มีในระบบแล้ว)"
@@ -484,6 +494,10 @@ with tab1:
                 
                 st.button("🔙 กลับ Menu หลัก", on_click=clear_all_and_restart, key="back_menu_single")
 
+                # 🟢 แก้ไข 4: Clean ค่า Scan Value ทันที (Single Mode)
+                if scan_value:
+                     scan_value = str(scan_value).strip()
+
                 is_new_scan = (scan_value is not None) and (scan_value != st.session_state.last_scan_processed)
 
                 if not st.session_state.temp_tracking:
@@ -501,7 +515,7 @@ with tab1:
                         if scan_value == st.session_state.current_user:
                             st.warning("⚠️ นั่นคือ User! กรุณาสแกน Tracking", icon="⚠️")
                         
-                        # --- 🟢 (Modified) Check DB Duplicate for Single Mode ---
+                        # --- Check DB Duplicate for Single Mode ---
                         elif check_tracking_exists(scan_value):
                             st.warning(f"⚠️ Tracking {scan_value} มีในระบบแล้ว!", icon="⚠️")
                             # ไม่ set temp_tracking, ทำให้ต้องสแกนใหม่
