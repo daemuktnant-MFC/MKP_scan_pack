@@ -336,7 +336,7 @@ with tab1:
         if is_new_scan:
             st.session_state.last_scan_processed = scan_value 
             if validate_and_lock_user(scan_value):
-                st.rerun()
+                #st.rerun()
 
         if st.session_state.show_user_not_found_error:
             scanner_prompt_placeholder.error(f"⚠️ ไม่พบ User '{st.session_state.last_failed_user_scan}'! กรุณาสแกน User ที่ถูกต้อง", icon="⚠️")
