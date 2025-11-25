@@ -328,7 +328,7 @@ with tab1:
                 if manual_user_id:
                     if validate_and_lock_user(manual_user_id):
                         st.session_state.last_scan_processed = manual_user_id 
-                        st.rerun() 
+                        #st.rerun() 
                 else:
                     st.warning("กรุณาป้อน User ID")
 
