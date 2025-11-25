@@ -427,7 +427,7 @@ with tab1:
                       use_container_width=True,
                       on_click=save_all_to_db,
                       disabled=(not st.session_state.staged_scans or not st.session_state.temp_barcode or not st.session_state.current_user)
-                     )
+                      )
 
             st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
             if not st.session_state.staged_scans:
@@ -524,7 +524,7 @@ with tab1:
                       use_container_width=True,
                       on_click=save_all_to_db,
                       disabled=(not st.session_state.staged_scans)
-                     )
+                      )
 
             st.subheader(f"3. รายการที่กำลังสแกน ({len(st.session_state.staged_scans)} รายการ)")
             
@@ -642,7 +642,7 @@ with tab2:
                                     session.commit()
                                     st.success(f"บันทึก User '{user_id}' สำเร็จ!")
                                     st.cache_data.clear() 
-                                    #st.rerun() 
+                                    st.rerun() 
                             else:
                                 update_query = text("""
                                     UPDATE user_data
@@ -653,7 +653,7 @@ with tab2:
                                 session.commit()
                                 st.success(f"อัปเดต User '{user_id}' สำเร็จ!")
                                 st.cache_data.clear()
-                                #st.rerun()
+                                st.rerun()
                                 
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาด: {e}")
@@ -669,17 +669,18 @@ with tab2:
                             session.commit()
                             st.warning(f"ลบ User '{user_id}' ออกจากระบบแล้ว!")
                             st.cache_data.clear()
-                            #st.rerun() 
+                            st.rerun() 
                             
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาดในการลบ: {e}")
 
-        # === 🟢 1.2 ส่วน Upload File (Excel/CSV) - เพิ่มใหม่ ===
+        # === 🟢 1.2 ส่วน Upload File (Excel/CSV) - ปรับ Layout ใหม่ ===
     with st.expander("📂 Upload Users (Excel/CSV) เพื่อเพิ่มทีละหลายคน", expanded=True):
         st.info("💡 ไฟล์ต้องมีหัวตาราง: **user_id**, **name**, **surname** (ระบบจะเช็ค User ID ซ้ำให้)")
 
-        # --- 🔵 (ใหม่) ปุ่ม Download Template 🔵 ---
+        # --- 🔵 ปรับให้ปุ่ม Download และ Upload อยู่บรรทัดเดียวกัน 🔵 ---
         col_dl, col_up = st.columns([1, 2], gap="small")
+        
         with col_dl:
             # สร้าง Template DataFrame
             template_data = pd.DataFrame([
@@ -701,9 +702,11 @@ with tab2:
                 use_container_width=True,
                 help="คลิกเพื่อโหลดไฟล์ตัวอย่าง .csv สำหรับนำไปกรอกข้อมูล"
             )
-        # ---------------------------------------------
         
-        uploaded_file = st.file_uploader("เลือกไฟล์ Excel หรือ CSV", type=['xlsx', 'xls', 'csv'])
+        # ย้าย File Uploader มาไว้ใน col_up เพื่อให้อยู่บรรทัดเดียวกับปุ่ม Download
+        with col_up:
+            uploaded_file = st.file_uploader("เลือกไฟล์ Excel หรือ CSV", type=['xlsx', 'xls', 'csv'], label_visibility="collapsed")
+        # ---------------------------------------------
         
         if uploaded_file is not None:
             try:
