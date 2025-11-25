@@ -73,7 +73,7 @@ div[data-testid="stTabs-panel-0"] [data-testid="stError"] {
     padding: 0.6rem 0.75rem !important;
 }
 
-/* --- 🟢 (ใหม่) 10. ปรับความสูงปุ่ม Download ใน Expander ให้เท่ากับ File Uploader --- */
+/* 10. ปรับความสูงปุ่ม Download ใน Expander ให้เท่ากับ File Uploader */
 div[data-testid="stExpander"] [data-testid="stDownloadButton"] button {
     height: 66px !important;  /* ความสูงที่พอดีกับช่อง Upload */
     display: flex;
@@ -201,6 +201,25 @@ def validate_and_lock_user(user_id_to_check):
         st.error(f"เกิดข้อผิดพลาดในการตรวจสอบ User: {e}")
         st.session_state.show_user_not_found_error = False 
         return False
+
+# --- 🟢 (ใหม่) ฟังก์ชันเช็ค Tracking ซ้ำใน DB ---
+def check_tracking_exists(tracking_code):
+    """เช็คว่า Tracking นี้มีอยู่ในตาราง scans หรือยัง"""
+    if not tracking_code:
+        return False
+    try:
+        # ใช้ ttl=0 เพื่อให้ดึงข้อมูลสดใหม่เสมอ
+        query = "SELECT COUNT(1) as count FROM scans WHERE tracking_code = :tracking"
+        params = {"tracking": tracking_code}
+        df = supabase_conn.query(query, params=params, ttl=0)
+        
+        if not df.empty and df['count'][0] > 0:
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error Checking DB: {e}")
+        return False
+# ---------------------------------------------
 
 def add_and_clear_staging():
     """(Single) เพิ่มรายการและล้างค่า staging"""
@@ -366,9 +385,17 @@ with tab1:
                     elif scan_value == st.session_state.current_user:
                         st.warning("⚠️ นั่นคือ User! กรุณาสแกน Tracking Number", icon="⚠️")
                         st.session_state.show_duplicate_tracking_error = False
+                    
+                    # --- 🟢 (Modified) Check Duplicate in Staging ---
                     elif any(item["tracking"] == scan_value for item in st.session_state.staged_scans):
                         st.session_state.show_duplicate_tracking_error = True
                         st.session_state.last_scanned_tracking = scan_value 
+                    
+                    # --- 🟢 (Modified) Check Duplicate in DB ---
+                    elif check_tracking_exists(scan_value):
+                        st.session_state.show_duplicate_tracking_error = True
+                        st.session_state.last_scanned_tracking = f"{scan_value} (มีในระบบแล้ว)"
+                    
                     else:
                         st.session_state.staged_scans.append({
                             "id": str(uuid.uuid4()),
@@ -384,7 +411,7 @@ with tab1:
                 scanner_prompt_placeholder.info("ขั้นตอนที่ 2: สแกน Barcode สินค้า...")
             else:
                 if st.session_state.show_duplicate_tracking_error:
-                    scanner_prompt_placeholder.error(f"⚠️ สแกนซ้ำ! '{st.session_state.last_scanned_tracking}' มีในรายการแล้ว", icon="⚠️")
+                    scanner_prompt_placeholder.error(f"⚠️ สแกนซ้ำ! '{st.session_state.last_scanned_tracking}'", icon="⚠️")
                 else:
                     scanner_prompt_placeholder.info("ขั้นตอนที่ 3: สแกน Tracking Number ทีละกล่อง...")
 
@@ -473,6 +500,12 @@ with tab1:
                     if not st.session_state.temp_tracking:
                         if scan_value == st.session_state.current_user:
                             st.warning("⚠️ นั่นคือ User! กรุณาสแกน Tracking", icon="⚠️")
+                        
+                        # --- 🟢 (Modified) Check DB Duplicate for Single Mode ---
+                        elif check_tracking_exists(scan_value):
+                            st.warning(f"⚠️ Tracking {scan_value} มีในระบบแล้ว!", icon="⚠️")
+                            # ไม่ set temp_tracking, ทำให้ต้องสแกนใหม่
+                            
                         else:
                             st.session_state.temp_tracking = scan_value
                             st.session_state.show_dialog_for = 'tracking' 
@@ -627,7 +660,7 @@ with tab2:
                                     session.commit()
                                     st.success(f"บันทึก User '{user_id}' สำเร็จ!")
                                     st.cache_data.clear() 
-                                    #st.rerun() 
+                                    st.rerun() 
                             else:
                                 update_query = text("""
                                     UPDATE user_data
