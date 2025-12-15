@@ -9,8 +9,8 @@ import pytz
 
 # --- CONFIGURATION ---
 # 🔴 นำ ID ของ Google Sheet "Scan_Pack" ที่คุณสร้างมาใส่ตรงนี้
-SHEET_ID = 'REPLACE_WITH_YOUR_SHEET_ID' 
-SHEET_NAME = 'Sheet1' # ชื่อ Tab ด้านล่าง (ปกติคือ Sheet1)
+SHEET_ID = '/d/1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08/edit?gid=0#gid=0' 
+SHEET_NAME = 'Data_Pack' # ชื่อ Tab ด้านล่าง (ปกติคือ Sheet1)
 
 # --- CSS STYLING (คงเดิม) ---
 st.markdown("""
