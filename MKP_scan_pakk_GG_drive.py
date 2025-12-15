@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 from datetime import datetime
 import time
 import pytz
-import uuid  # ใช้สำหรับสร้าง ID อ้างอิงเวลาลบรายการ
+import uuid
 
 # --- CONFIGURATION ---
 SHEET_ID = '1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08'
@@ -50,7 +50,6 @@ def save_batch_to_sheet(data_list):
     try:
         ws = get_sheet_connection()
         if ws:
-            # เตรียมข้อมูลสำหรับ append_rows (List of Lists)
             rows_to_add = []
             tz = pytz.timezone('Asia/Bangkok')
             ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -79,24 +78,24 @@ def load_data_from_sheet():
 
 # --- SESSION STATE MANAGEMENT ---
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
-if 'staged_data' not in st.session_state: st.session_state.staged_data = [] # เก็บข้อมูลรอบันทึก
+if 'staged_data' not in st.session_state: st.session_state.staged_data = [] 
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
 
 # --- CALLBACKS ---
 
 def add_to_staging(tracking, barcode, mode):
-    """เพิ่มข้อมูลลงรายการพัก (ยังไม่ลง Google Sheet)"""
+    """เพิ่มข้อมูลลงรายการพัก"""
     new_item = {
-        "id": str(uuid.uuid4()), # สร้าง ID ไม่ซ้ำเพื่อใช้ตอนลบ
+        "id": str(uuid.uuid4()), 
         "user_id": st.session_state.user_id,
         "tracking": tracking,
         "barcode": barcode,
         "mode": mode,
         "time_scan": datetime.now().strftime("%H:%M:%S")
     }
-    # เพิ่มรายการใหม่ไปไว้บนสุด
     st.session_state.staged_data.insert(0, new_item)
-    st.toast(f"📥 เพิ่มรายการ: {tracking}", icon="plus")
+    # --- แก้ไขจุดที่ Error (เปลี่ยน icon="plus" เป็น icon="➕") ---
+    st.toast(f"📥 เพิ่มรายการ: {tracking}", icon="➕")
 
 def delete_from_staging(item_id):
     """ลบรายการออกจาก Staging"""
@@ -109,7 +108,7 @@ def on_scan_mode_a():
     barcode = st.session_state.get('locked_barcode', '')
     if tracking and barcode:
         add_to_staging(tracking, barcode, "Mode A")
-        st.session_state.mkp_tracking_a = "" # Clear input
+        st.session_state.mkp_tracking_a = "" 
 
 def on_scan_mode_b():
     """Mode B: Scan Both -> Add to Staging"""
@@ -127,15 +126,14 @@ def confirm_save_all():
         return
 
     with st.spinner(f"กำลังบันทึก {len(st.session_state.staged_data)} รายการ..."):
-        # ส่งข้อมูลไปบันทึก (เรียงจากเก่าไปใหม่ เพื่อให้ Timestamp ใน Excel ถูกต้อง)
-        # staged_data เราเก็บแบบ ใหม่->เก่า เพื่อโชว์ใน App แต่ตอนบันทึกควรบันทึกแบบ เก่า->ใหม่
+        # กลับด้านข้อมูลเพื่อให้บันทึกตามลำดับเวลา (เก่า -> ใหม่)
         data_to_save = st.session_state.staged_data[::-1] 
         
         success = save_batch_to_sheet(data_to_save)
         
         if success:
             st.success("✅ บันทึกข้อมูลลง Google Sheet เรียบร้อย!")
-            st.session_state.staged_data = [] # ล้างค่าทั้งหมด
+            st.session_state.staged_data = [] 
             st.balloons()
             time.sleep(1)
             st.rerun()
@@ -161,7 +159,6 @@ else:
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
 
     with tab1:
-        # เลือกโหมดการทำงาน
         scan_mode = st.radio(
             "เลือกรูปแบบงาน:",
             ["🚀 1. สินค้าเดียว -> หลาย Tracking", "📦 2. งานปกติ (1 Tracking : 1 Barcode)"],
@@ -186,6 +183,7 @@ else:
 
             if st.session_state.locked_barcode:
                 st.text_input("2. ยิง Tracking ID (เพิ่มลงรายการ)", key="mkp_tracking_a", on_change=on_scan_mode_a)
+                # ใช้ on_click เพื่อป้องกัน Error input
                 st.button("เพิ่มรายการ (Manual)", on_click=on_scan_mode_a)
 
         else:
@@ -195,23 +193,19 @@ else:
             with c2: st.text_input("2. Product Barcode", key="mkp_barcode_b", on_change=on_scan_mode_b)
             st.button("เพิ่มรายการ", on_click=on_scan_mode_b)
 
-        # === STAGING TABLE AREA (ส่วนที่ปรับปรุงใหม่) ===
+        # === STAGING TABLE AREA ===
         st.markdown("---")
         count_waiting = len(st.session_state.staged_data)
         
-        # Header ของตาราง
         col_h1, col_h2 = st.columns([3, 1])
         with col_h1:
             st.subheader(f"📋 รายการรอบันทึก ({count_waiting})")
         with col_h2:
-            # ปุ่มบันทึกใหญ่ๆ
             if count_waiting > 0:
                 st.button(f"☁️ ยืนยันบันทึก ({count_waiting})", type="primary", use_container_width=True, on_click=confirm_save_all)
 
         if count_waiting > 0:
-            # แสดงรายการแบบ Loop สร้าง Container
             with st.container(border=True):
-                # หัวตาราง
                 h1, h2, h3, h4 = st.columns([1, 3, 3, 1])
                 h1.markdown("**เวลา**")
                 h2.markdown("**Tracking ID**")
@@ -219,13 +213,11 @@ else:
                 h4.markdown("**ลบ**")
                 st.divider()
                 
-                # Loop Data
                 for item in st.session_state.staged_data:
                     c1, c2, c3, c4 = st.columns([1, 3, 3, 1])
                     c1.caption(item['time_scan'])
                     c2.write(item['tracking'])
                     c3.write(item['barcode'])
-                    # ปุ่มลบแต่ละบรรทัด
                     c4.button("❌", key=f"del_{item['id']}", on_click=delete_from_staging, args=(item['id'],))
         else:
             st.caption("ยังไม่มีรายการสแกน... (สแกนเพื่อเพิ่มรายการ)")
