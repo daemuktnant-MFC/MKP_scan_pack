@@ -7,12 +7,11 @@ from datetime import datetime, timedelta
 import time
 import pytz
 
-# --- CONFIGURATION ---
-# 🔴 นำ ID ของ Google Sheet "Scan_Pack" ที่คุณสร้างมาใส่ตรงนี้
-SHEET_ID = '/d/1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08/edit?gid=0#gid=0' 
-SHEET_NAME = 'Data_Pack' # ชื่อ Tab ด้านล่าง (ปกติคือ Sheet1)
+# --- CONFIGURATION (อัปเดตตามที่คุณส่งมา) ---
+SHEET_ID = '1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08'
+SHEET_NAME = 'Data_Pack' 
 
-# --- CSS STYLING (คงเดิม) ---
+# --- CSS STYLING ---
 st.markdown("""
 <style>
 div.block-container { padding-top: 1rem; padding-bottom: 1rem; }
@@ -21,7 +20,7 @@ h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- AUTHENTICATION FUNCTIONS (แบบเดียวกับ Amaze App) ---
+# --- AUTHENTICATION FUNCTIONS ---
 def get_credentials():
     try:
         if "oauth" in st.secrets:
@@ -50,8 +49,12 @@ def get_sheet_connection():
             sh = gc.open_by_key(SHEET_ID)
             worksheet = sh.worksheet(SHEET_NAME)
             return worksheet
+        except gspread.WorksheetNotFound:
+            st.error(f"❌ ไม่พบ Tab ชื่อ '{SHEET_NAME}' ใน Google Sheet")
+            st.info("กรุณาตรวจสอบชื่อ Tab ด้านล่างของ Google Sheet ว่าชื่อ 'Data_Pack' ถูกต้องหรือไม่")
+            return None
         except Exception as e:
-            st.error(f"ไม่สามารถเปิด Google Sheet ได้: {e}")
+            st.error(f"❌ ไม่สามารถเปิด Google Sheet ได้: {e}")
             return None
     return None
 
@@ -74,7 +77,7 @@ def save_data_to_sheet(user_id, order_id, barcode, status, qty, note=""):
         return False
     return False
 
-@st.cache_data(ttl=60) # Cache 60 วินาที เพื่อไม่ให้โหลดหนักเกินไป
+@st.cache_data(ttl=10) # ลด Cache เหลือ 10 วินาที เพื่อให้เห็นข้อมูลใหม่ไวขึ้น
 def load_data_from_sheet():
     try:
         worksheet = get_sheet_connection()
@@ -92,7 +95,7 @@ def load_data_from_sheet():
     return pd.DataFrame()
 
 # --- MAIN APP ---
-st.title("📦 MKP Scan & Pack (Google Sheets)")
+st.title("📦 MKP Scan & Pack")
 
 # Session State Init
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
@@ -157,8 +160,6 @@ else:
                             "Status": status_opt
                         })
                         time.sleep(1)
-                        # Optional: Clear inputs by rerunning or using session state callbacks if needed
-                        # st.rerun() 
                     else:
                         st.error("เกิดข้อผิดพลาดในการบันทึก")
             else:
@@ -181,32 +182,34 @@ else:
         df = load_data_from_sheet()
 
         if not df.empty:
-            # Convert Timezone for calculation/filtering if needed
-            # แต่ข้อมูลใน Sheet เป็น String แล้วจากการบันทึก
-            
             # Filters
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 search_order = st.text_input("🔍 ค้นหา Order ID", key="search_dash")
             with col_f2:
-                filter_user = st.multiselect("กรอง User", options=df['User ID'].unique())
+                if 'User ID' in df.columns:
+                    filter_user = st.multiselect("กรอง User", options=df['User ID'].unique())
+                else:
+                    filter_user = []
 
             # Apply Filters
             df_show = df.copy()
-            if search_order:
-                df_show = df_show[df_show['Order ID'].str.contains(search_order, case=False, na=False)]
-            if filter_user:
+            if search_order and 'Order ID' in df_show.columns:
+                df_show = df_show[df_show['Order ID'].astype(str).str.contains(search_order, case=False, na=False)]
+            if filter_user and 'User ID' in df_show.columns:
                 df_show = df_show[df_show['User ID'].isin(filter_user)]
 
             # Summary Metrics
             m1, m2, m3 = st.columns(3)
             m1.metric("Total Rows", len(df_show))
-            m2.metric("Unique Orders", df_show['Order ID'].nunique())
+            if 'Order ID' in df_show.columns:
+                m2.metric("Unique Orders", df_show['Order ID'].nunique())
             
-            # Try to sum Qty if it's numeric
+            # Try to sum Qty
             try:
-                total_qty = df_show['Qty'].astype(int).sum()
-                m3.metric("Total Items (Qty)", total_qty)
+                if 'Qty' in df_show.columns:
+                    total_qty = df_show['Qty'].astype(int).sum()
+                    m3.metric("Total Items (Qty)", total_qty)
             except:
                 m3.metric("Total Items", "N/A")
 
@@ -217,7 +220,7 @@ else:
             st.download_button(
                 "📥 Download CSV",
                 csv,
-                "mkp_scan_pack_data.csv",
+                "mkp_data_pack.csv",
                 "text/csv",
                 key='download-csv'
             )
