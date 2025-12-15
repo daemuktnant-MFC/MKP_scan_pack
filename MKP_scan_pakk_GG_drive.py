@@ -148,9 +148,9 @@ else:
                 # ใช้ on_change เพื่อบันทึกทันทีที่ยิงเสร็จ
                 st.text_input("ยิง Tracking ID ที่นี่...", key="mkp_tracking_a", on_change=on_scan_mode_a, help="ยิงปุ๊บ บันทึกปั๊บ")
                 
-                # Manual Save Button (backup)
-                if st.button("💾 บันทึกมือ (กรณีไม่ Auto)", key="btn_save_a"):
-                    on_scan_mode_a()
+                # --- แก้ไขจุด Error ตรงนี้ ---
+                # เปลี่ยนจาก if st.button(...): func() เป็น st.button(..., on_click=func)
+                st.button("💾 บันทึกมือ (กรณีไม่ Auto)", key="btn_save_a", on_click=on_scan_mode_a)
 
         # ==========================================
         # MODE B: 1 Tracking -> 1 Barcode
@@ -166,8 +166,8 @@ else:
                 # ช่อง Barcode (ใส่ Logic on_change ไว้ที่นี่ เพราะเป็นขั้นตอนสุดท้าย)
                 st.text_input("2. Product Barcode", key="mkp_barcode_b", on_change=on_scan_mode_b)
 
-            if st.button("💾 บันทึก (Save)", key="btn_save_b"):
-                on_scan_mode_b()
+            # --- แก้ไขจุด Error ตรงนี้ด้วย ---
+            st.button("💾 บันทึก (Save)", key="btn_save_b", on_click=on_scan_mode_b)
 
         # --- HISTORY LOG ---
         if st.session_state.scan_history:
