@@ -58,7 +58,8 @@ def save_batch_to_sheet(data_list):
             tz = pytz.timezone('Asia/Bangkok')
             ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
             for item in data_list:
-                row = [ts, item['user_id'], item['tracking'], item['barcode'], "Normal", 1, item['mode']]
+                # เพิ่ม License Plate ลงใน Column สุดท้าย
+                row = [ts, item['user_id'], item['tracking'], item['barcode'], "Normal", 1, item['mode'], item['license_plate']]
                 rows_to_add.append(row)
             ws.append_rows(rows_to_add)
             return True
@@ -67,7 +68,6 @@ def save_batch_to_sheet(data_list):
         return False
     return False
 
-# --- แก้ไข 1: เพิ่มฟังก์ชัน Clear Cache ---
 @st.cache_data(ttl=30) 
 def load_data_from_sheet():
     try:
@@ -76,7 +76,6 @@ def load_data_from_sheet():
             data = ws.get_all_values()
             if len(data) > 1:
                 df = pd.DataFrame(data[1:], columns=data[0])
-                # --- แก้ไข 2: ตัดช่องว่างชื่อหัวตารางออก (Trim Headers) ---
                 df.columns = df.columns.str.strip()
                 return df
     except: pass
@@ -84,50 +83,50 @@ def load_data_from_sheet():
 
 # --- SESSION STATE ---
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
+if 'license_plate' not in st.session_state: st.session_state.license_plate = "" # เก็บทะเบียนรถ
 if 'staged_data' not in st.session_state: st.session_state.staged_data = [] 
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
 if 'scan_error' not in st.session_state: st.session_state.scan_error = None 
+if 'play_sound' not in st.session_state: st.session_state.play_sound = None # State สำหรับเล่นเสียง
+
+# --- SOUND SYSTEM ---
+def play_audio_feedback():
+    """ฟังก์ชันเล่นเสียง (ซ่อน Player ไว้)"""
+    if st.session_state.play_sound == 'success':
+        # เสียง Beep สั้น
+        sound_url = "https://www.soundjay.com/buttons/sounds/button-16.mp3"
+        st.audio(sound_url, format="audio/mp3", autoplay=True)
+    elif st.session_state.play_sound == 'error':
+        # เสียง Buzzer เตือนภัย
+        sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
+        st.audio(sound_url, format="audio/mp3", autoplay=True)
+    
+    # Reset เพื่อไม่ให้เล่นซ้ำตอน Refresh หน้า
+    st.session_state.play_sound = None
 
 # --- DUPLICATE CHECK FUNCTION ---
 def check_duplicate(tracking):
-    """
-    return: (bool_is_duplicate, str_message)
-    """
-    # 1. เช็คใน Staging (รายการที่รอบันทึก)
     for item in st.session_state.staged_data:
         if str(item['tracking']).strip() == str(tracking).strip():
             return True, f"⚠️ ซ้ำในรายการรอ! ({tracking})"
 
-    # 2. เช็คใน Google Sheet (Database)
     df = load_data_from_sheet()
     if not df.empty:
-        # พยายามหา Column ที่เก็บ Tracking ID
         target_col = None
-        # รายชื่อ Column ที่เป็นไปได้
         possible_cols = ['Tracking ID', 'Order ID', 'Tracking', 'tracking_id', 'order_id']
-        
         for col in df.columns:
             if col in possible_cols:
-                target_col = col
-                break
+                target_col = col; break
         
         if target_col:
-            # แปลงเป็น String และ Trim ช่องว่างเพื่อความชัวร์
             all_trackings = df[target_col].astype(str).str.strip().values
             if str(tracking).strip() in all_trackings:
                 return True, f"⛔ เคยบันทึกไปแล้ว! ({tracking})"
-        else:
-            # กรณีหา Column ไม่เจอ ให้แจ้งเตือนเล็กน้อย (Optional debug)
-            # st.toast(f"หา Column Tracking ไม่เจอใน Sheet: {list(df.columns)}", icon="❓")
-            pass
-
     return False, ""
 
 # --- CALLBACKS ---
 def add_to_staging(tracking, barcode, mode):
     st.session_state.scan_error = None
-    
-    # Trim ค่าก่อนเช็ค
     tracking = tracking.strip()
     barcode = barcode.strip()
 
@@ -135,18 +134,25 @@ def add_to_staging(tracking, barcode, mode):
     
     if is_dup:
         st.session_state.scan_error = msg 
+        st.session_state.play_sound = 'error' # 🔊 Trigger Error Sound
         st.toast(msg, icon="🚫") 
         return 
-        
+    
+    # ถ้าทะเบียนรถว่าง ให้แจ้งเตือน (แต่ไม่บล็อกการทำงาน หรือจะบล็อกก็ได้)
+    if not st.session_state.license_plate:
+        st.toast("⚠️ อย่าลืมระบุทะเบียนรถ!", icon="🚛")
+
     new_item = {
         "id": str(uuid.uuid4()), 
         "user_id": st.session_state.user_id,
+        "license_plate": st.session_state.license_plate, # บันทึกทะเบียนรถ
         "tracking": tracking,
         "barcode": barcode,
         "mode": mode,
         "time_scan": datetime.now().strftime("%H:%M:%S")
     }
     st.session_state.staged_data.insert(0, new_item)
+    st.session_state.play_sound = 'success' # 🔊 Trigger Success Sound
     st.toast(f"📥 เพิ่มรายการ: {tracking}", icon="➕")
 
 def delete_from_staging(item_id):
@@ -181,10 +187,7 @@ def confirm_save_all():
             st.success("✅ บันทึกข้อมูลลง Google Sheet เรียบร้อย!")
             st.session_state.staged_data = [] 
             st.session_state.scan_error = None 
-            
-            # --- แก้ไข 3: สั่งล้าง Cache ทันที เพื่อให้การเช็คซ้ำครั้งต่อไปเป็นข้อมูลล่าสุด ---
             load_data_from_sheet.clear()
-            
             st.balloons()
             time.sleep(1)
             st.rerun()
@@ -194,16 +197,32 @@ def confirm_save_all():
 # --- MAIN APP ---
 st.title("📦 MKP Scan & Pack (Pro)")
 
+# เรียกฟังก์ชันเล่นเสียง (ทำงานแบบ Background)
+play_audio_feedback()
+
 if not st.session_state.user_id:
     st.info("ระบุรหัสพนักงาน")
     u = st.text_input("User ID", key="login")
     if st.button("Start") and u: st.session_state.user_id = u; st.rerun()
 else:
+    # --- SIDEBAR: Login Info & Vehicle ---
     with st.sidebar:
         st.write(f"👤 **{st.session_state.user_id}**")
+        st.markdown("---")
+        
+        # 🚛 ส่วน Scan ทะเบียนรถ (Global Setting)
+        st.subheader("🚛 ข้อมูลรถขนส่ง")
+        st.text_input("ทะเบียนรถ (Vehicle ID)", key="license_plate", help="ระบุทะเบียนรถเพื่องานรอบนี้")
+        if st.session_state.license_plate:
+            st.success(f"รถ: {st.session_state.license_plate}")
+        else:
+            st.warning("ยังไม่ระบุทะเบียนรถ")
+            
+        st.markdown("---")
         if st.button("Logout"): 
             st.session_state.user_id = ""
             st.session_state.staged_data = []
+            st.session_state.license_plate = ""
             st.rerun()
 
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
@@ -224,7 +243,7 @@ else:
 
         # === SCAN INPUT AREA ===
         if "1." in scan_mode:
-            st.info("💡 Mode A: สแกนสินค้าต้นแบบ 1 ครั้ง -> ยิง Tracking รัวๆ -> กดบันทึกทีเดียว")
+            st.info("💡 Mode A: สแกนสินค้าต้นแบบ 1 ครั้ง -> ยิง Tracking รัวๆ")
             
             c1, c2 = st.columns([3, 1])
             with c1:
@@ -242,7 +261,7 @@ else:
                 st.button("เพิ่มรายการ (Manual)", on_click=on_scan_mode_a)
 
         else:
-            st.info("💡 Mode B: สแกนคู่ (Tracking + Barcode) -> เพิ่มลงรายการ -> กดบันทึกทีเดียว")
+            st.info("💡 Mode B: สแกนคู่ (Tracking + Barcode)")
             c1, c2 = st.columns(2)
             with c1: st.text_input("1. Tracking ID", key="mkp_tracking_b")
             with c2: st.text_input("2. Product Barcode", key="mkp_barcode_b", on_change=on_scan_mode_b)
@@ -261,25 +280,28 @@ else:
 
         if count_waiting > 0:
             with st.container(border=True):
-                h1, h2, h3, h4 = st.columns([1, 3, 3, 1])
+                # ปรับ Header เพิ่มทะเบียนรถให้เห็นด้วย
+                h1, h2, h3, h4, h5 = st.columns([1, 2, 3, 3, 1])
                 h1.markdown("**เวลา**")
-                h2.markdown("**Tracking ID**")
-                h3.markdown("**Barcode**")
-                h4.markdown("**ลบ**")
+                h2.markdown("**ทะเบียนรถ**")
+                h3.markdown("**Tracking**")
+                h4.markdown("**Barcode**")
+                h5.markdown("**ลบ**")
                 st.divider()
                 
                 for item in st.session_state.staged_data:
-                    c1, c2, c3, c4 = st.columns([1, 3, 3, 1])
+                    c1, c2, c3, c4, c5 = st.columns([1, 2, 3, 3, 1])
                     c1.caption(item['time_scan'])
-                    c2.write(item['tracking'])
-                    c3.write(item['barcode'])
-                    c4.button("❌", key=f"del_{item['id']}", on_click=delete_from_staging, args=(item['id'],))
+                    c2.caption(item['license_plate']) # แสดงทะเบียนรถ
+                    c3.write(item['tracking'])
+                    c4.write(item['barcode'])
+                    c5.button("❌", key=f"del_{item['id']}", on_click=delete_from_staging, args=(item['id'],))
         else:
             st.caption("ยังไม่มีรายการสแกน... (สแกนเพื่อเพิ่มรายการ)")
 
     with tab2:
         if st.button("🔄 Refresh Data"): 
-            load_data_from_sheet.clear() # Clear Cache ปุ่ม Refresh ด้วย
+            load_data_from_sheet.clear()
             st.rerun()
             
         df = load_data_from_sheet()
