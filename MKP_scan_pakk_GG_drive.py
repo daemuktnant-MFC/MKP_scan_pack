@@ -18,12 +18,17 @@ st.markdown("""
 div.block-container { padding-top: 1rem; padding-bottom: 1rem; }
 h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
 .big-font { font-size: 20px !important; font-weight: bold; }
-/* ปรับแต่งตารางรายการรอบันทึก */
-.st-key-staging_container {
-    border: 1px solid #ddd;
-    border-radius: 10px;
-    padding: 10px;
-    background-color: #f9f9f9;
+/* กล่องแจ้งเตือน Error */
+.error-box {
+    padding: 1rem;
+    background-color: #ffcccc;
+    color: #cc0000;
+    border-radius: 8px;
+    border: 1px solid #cc0000;
+    margin-bottom: 1rem;
+    font-weight: bold;
+    text-align: center;
+    font-size: 1.2rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -46,19 +51,15 @@ def get_sheet_connection():
     return None
 
 def save_batch_to_sheet(data_list):
-    """บันทึกข้อมูลทีละหลายแถว (Batch Save)"""
     try:
         ws = get_sheet_connection()
         if ws:
             rows_to_add = []
             tz = pytz.timezone('Asia/Bangkok')
             ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-            
             for item in data_list:
-                # Format: [Timestamp, User ID, Tracking ID, Barcode, Status, Qty, Note]
                 row = [ts, item['user_id'], item['tracking'], item['barcode'], "Normal", 1, item['mode']]
                 rows_to_add.append(row)
-            
             ws.append_rows(rows_to_add)
             return True
     except Exception as e:
@@ -66,7 +67,7 @@ def save_batch_to_sheet(data_list):
         return False
     return False
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=30) # Cache 30 วินาที เพื่อไม่ให้โหลดหนักเกินไป
 def load_data_from_sheet():
     try:
         ws = get_sheet_connection()
@@ -74,17 +75,55 @@ def load_data_from_sheet():
             data = ws.get_all_values()
             if len(data) > 1: return pd.DataFrame(data[1:], columns=data[0])
     except: pass
-    return pd.DataFrame(columns=['Timestamp', 'User ID', 'Order ID', 'Barcode', 'Status', 'Qty', 'Note'])
+    return pd.DataFrame()
 
-# --- SESSION STATE MANAGEMENT ---
+# --- SESSION STATE ---
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
 if 'staged_data' not in st.session_state: st.session_state.staged_data = [] 
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
+if 'scan_error' not in st.session_state: st.session_state.scan_error = None # เก็บข้อความ Error ล่าสุด
+
+# --- DUPLICATE CHECK FUNCTION ---
+def check_duplicate(tracking):
+    """
+    return: (bool_is_duplicate, str_message)
+    """
+    # 1. เช็คใน Staging (รายการที่รอบันทึก)
+    for item in st.session_state.staged_data:
+        if item['tracking'] == tracking:
+            return True, f"⚠️ ซ้ำในรายการรอ! ({tracking})"
+
+    # 2. เช็คใน Google Sheet (Database)
+    df = load_data_from_sheet()
+    if not df.empty:
+        # พยายามหา Column ที่เก็บ Tracking ID (รองรับทั้งชื่อ 'Tracking ID' และ 'Order ID')
+        target_col = None
+        if 'Tracking ID' in df.columns: target_col = 'Tracking ID'
+        elif 'Order ID' in df.columns: target_col = 'Order ID'
+        elif 'Tracking' in df.columns: target_col = 'Tracking'
+        
+        if target_col:
+            # แปลงเป็น String และ Trim ช่องว่างเพื่อความชัวร์
+            all_trackings = df[target_col].astype(str).str.strip().values
+            if tracking in all_trackings:
+                return True, f"⛔ เคยบันทึกไปแล้ว! ({tracking})"
+
+    return False, ""
 
 # --- CALLBACKS ---
-
 def add_to_staging(tracking, barcode, mode):
-    """เพิ่มข้อมูลลงรายการพัก"""
+    # Reset Error ก่อนเริ่มเช็ค
+    st.session_state.scan_error = None
+    
+    # Check Duplicate
+    is_dup, msg = check_duplicate(tracking)
+    
+    if is_dup:
+        st.session_state.scan_error = msg # แสดง Error บนหน้าจอ
+        st.toast(msg, icon="🚫") # แจ้งเตือนแบบ Toast
+        return # หยุดการทำงาน ไม่เพิ่มลงรายการ
+        
+    # ถ้าไม่ซ้ำ ก็เพิ่มตามปกติ
     new_item = {
         "id": str(uuid.uuid4()), 
         "user_id": st.session_state.user_id,
@@ -94,46 +133,40 @@ def add_to_staging(tracking, barcode, mode):
         "time_scan": datetime.now().strftime("%H:%M:%S")
     }
     st.session_state.staged_data.insert(0, new_item)
-    # --- แก้ไขจุดที่ Error (เปลี่ยน icon="plus" เป็น icon="➕") ---
     st.toast(f"📥 เพิ่มรายการ: {tracking}", icon="➕")
 
 def delete_from_staging(item_id):
-    """ลบรายการออกจาก Staging"""
     st.session_state.staged_data = [d for d in st.session_state.staged_data if d['id'] != item_id]
     st.toast("ลบรายการแล้ว", icon="🗑️")
 
 def on_scan_mode_a():
-    """Mode A: Scan Tracking -> Add to Staging"""
-    tracking = st.session_state.mkp_tracking_a
-    barcode = st.session_state.get('locked_barcode', '')
+    tracking = st.session_state.mkp_tracking_a.strip()
+    barcode = st.session_state.get('locked_barcode', '').strip()
     if tracking and barcode:
         add_to_staging(tracking, barcode, "Mode A")
         st.session_state.mkp_tracking_a = "" 
 
 def on_scan_mode_b():
-    """Mode B: Scan Both -> Add to Staging"""
-    tracking = st.session_state.mkp_tracking_b
-    barcode = st.session_state.mkp_barcode_b
+    tracking = st.session_state.mkp_tracking_b.strip()
+    barcode = st.session_state.mkp_barcode_b.strip()
     if tracking and barcode:
         add_to_staging(tracking, barcode, "Mode B")
         st.session_state.mkp_tracking_b = ""
         st.session_state.mkp_barcode_b = ""
 
 def confirm_save_all():
-    """บันทึกทุกรายการลง Google Sheets"""
     if not st.session_state.staged_data:
         st.warning("ไม่มีรายการให้บันทึก")
         return
 
     with st.spinner(f"กำลังบันทึก {len(st.session_state.staged_data)} รายการ..."):
-        # กลับด้านข้อมูลเพื่อให้บันทึกตามลำดับเวลา (เก่า -> ใหม่)
         data_to_save = st.session_state.staged_data[::-1] 
-        
         success = save_batch_to_sheet(data_to_save)
         
         if success:
             st.success("✅ บันทึกข้อมูลลง Google Sheet เรียบร้อย!")
             st.session_state.staged_data = [] 
+            st.session_state.scan_error = None # เคลียร์ Error ค้าง
             st.balloons()
             time.sleep(1)
             st.rerun()
@@ -141,9 +174,8 @@ def confirm_save_all():
             st.error("❌ บันทึกไม่สำเร็จ กรุณาลองใหม่")
 
 # --- MAIN APP ---
-st.title("📦 MKP Scan & Pack (Batch Save)")
+st.title("📦 MKP Scan & Pack (Pro)")
 
-# --- LOGIN ---
 if not st.session_state.user_id:
     st.info("ระบุรหัสพนักงาน")
     u = st.text_input("User ID", key="login")
@@ -159,6 +191,14 @@ else:
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
 
     with tab1:
+        # === แสดง Error Box ใหญ่ๆ ถ้ามี Error ===
+        if st.session_state.scan_error:
+            st.markdown(f'<div class="error-box">{st.session_state.scan_error}</div>', unsafe_allow_html=True)
+            # ปุ่มปิด Error manual (เผื่อมันค้าง)
+            if st.button("ปิดแจ้งเตือน"): 
+                st.session_state.scan_error = None
+                st.rerun()
+
         scan_mode = st.radio(
             "เลือกรูปแบบงาน:",
             ["🚀 1. สินค้าเดียว -> หลาย Tracking", "📦 2. งานปกติ (1 Tracking : 1 Barcode)"],
@@ -183,7 +223,6 @@ else:
 
             if st.session_state.locked_barcode:
                 st.text_input("2. ยิง Tracking ID (เพิ่มลงรายการ)", key="mkp_tracking_a", on_change=on_scan_mode_a)
-                # ใช้ on_click เพื่อป้องกัน Error input
                 st.button("เพิ่มรายการ (Manual)", on_click=on_scan_mode_a)
 
         else:
@@ -226,6 +265,12 @@ else:
         if st.button("🔄 Refresh Data"): st.cache_data.clear(); st.rerun()
         df = load_data_from_sheet()
         if not df.empty:
-            df.rename(columns={'Order ID': 'Tracking ID'}, inplace=True)
+            # เปลี่ยน Label ตอนแสดงผลให้สวยงาม
+            display_cols = df.columns.tolist()
+            if 'Order ID' in display_cols: 
+                df.rename(columns={'Order ID': 'Tracking ID'}, inplace=True)
+            elif 'Tracking' in display_cols:
+                df.rename(columns={'Tracking': 'Tracking ID'}, inplace=True)
+                
             st.write(f"Total Saved: {len(df)}")
-            st.dataframe(df.tail(10), use_container_width=True)
+            st.dataframe(df.tail(15), use_container_width=True)
