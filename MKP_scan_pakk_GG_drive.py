@@ -42,7 +42,7 @@ def get_credentials():
             return Credentials(None, refresh_token=info["refresh_token"], token_uri="https://oauth2.googleapis.com/token", client_id=info["client_id"], client_secret=info["client_secret"])
     except: return None
 
-# --- GOOGLE SHEETS CONNECTION (ปรับปรุงให้เลือก Tab ได้) ---
+# --- GOOGLE SHEETS CONNECTION ---
 def get_sheet_connection(sheet_name):
     creds = get_credentials()
     if creds:
@@ -52,13 +52,14 @@ def get_sheet_connection(sheet_name):
     return None
 
 def check_user_exists(user_id):
-    """ตรวจสอบว่า User ID มีอยู่ใน Sheet 'User_MKP' หรือไม่"""
+    """ตรวจสอบว่า User ID มีอยู่ใน Sheet 'User_MKP' (Column B) หรือไม่"""
     try:
         ws = get_sheet_connection(USER_SHEET_NAME)
         if ws:
-            # ดึงข้อมูลจาก Column A (คอลัมน์ที่ 1) ทั้งหมด
-            existing_users = ws.col_values(1)
-            # แปลงเป็น String และ Trim ช่องว่างเพื่อความชัวร์
+            # --- แก้ไขจุดนี้: เปลี่ยนเลข 1 เป็น 2 เพื่อเช็ค Column B ---
+            existing_users = ws.col_values(2) 
+            
+            # แปลงเป็น String และ Trim ช่องว่าง
             clean_users = [str(u).strip() for u in existing_users]
             
             if str(user_id).strip() in clean_users:
@@ -213,7 +214,7 @@ def confirm_save_all():
 st.title("📦 MKP Scan & Pack (Pro)")
 play_audio_feedback()
 
-# --- LOGIN SECTION (UPDATED) ---
+# --- LOGIN SECTION ---
 if not st.session_state.user_id:
     st.info("🔒 กรุณาสแกนรหัสพนักงาน")
     u_input = st.text_input("User ID", key="login")
@@ -228,7 +229,7 @@ if not st.session_state.user_id:
                     st.rerun()
                 else:
                     st.error(f"❌ ไม่พบรหัสพนักงาน: '{u_input}' ในระบบ")
-                    st.warning("กรุณาติดต่อ Admin หรือลองสแกนใหม่อีกครั้ง")
+                    st.warning("ตรวจสอบ Sheet: User_MKP คอลัมน์ B")
         else:
             st.warning("กรุณากรอกรหัสพนักงาน")
 
