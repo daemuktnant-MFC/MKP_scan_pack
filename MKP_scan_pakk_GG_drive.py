@@ -10,7 +10,8 @@ import uuid
 
 # --- CONFIGURATION ---
 SHEET_ID = '1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08'
-SHEET_NAME = 'Data_Pack' 
+DATA_SHEET_NAME = 'Data_Pack'    # Tab เก็บข้อมูลงาน
+USER_SHEET_NAME = 'User_MKP'     # Tab เก็บรายชื่อพนักงาน
 
 # --- CSS STYLING ---
 st.markdown("""
@@ -41,24 +42,44 @@ def get_credentials():
             return Credentials(None, refresh_token=info["refresh_token"], token_uri="https://oauth2.googleapis.com/token", client_id=info["client_id"], client_secret=info["client_secret"])
     except: return None
 
-# --- GOOGLE SHEETS ---
-def get_sheet_connection():
+# --- GOOGLE SHEETS CONNECTION (ปรับปรุงให้เลือก Tab ได้) ---
+def get_sheet_connection(sheet_name):
     creds = get_credentials()
     if creds:
         gc = gspread.authorize(creds)
-        try: return gc.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+        try: return gc.open_by_key(SHEET_ID).worksheet(sheet_name)
         except: return None
     return None
 
+def check_user_exists(user_id):
+    """ตรวจสอบว่า User ID มีอยู่ใน Sheet 'User_MKP' หรือไม่"""
+    try:
+        ws = get_sheet_connection(USER_SHEET_NAME)
+        if ws:
+            # ดึงข้อมูลจาก Column A (คอลัมน์ที่ 1) ทั้งหมด
+            existing_users = ws.col_values(1)
+            # แปลงเป็น String และ Trim ช่องว่างเพื่อความชัวร์
+            clean_users = [str(u).strip() for u in existing_users]
+            
+            if str(user_id).strip() in clean_users:
+                return True
+            else:
+                return False
+        else:
+            st.error(f"❌ ไม่พบ Tab ชื่อ '{USER_SHEET_NAME}' ใน Google Sheet")
+            return False
+    except Exception as e:
+        st.error(f"Error checking user: {e}")
+        return False
+
 def save_batch_to_sheet(data_list):
     try:
-        ws = get_sheet_connection()
+        ws = get_sheet_connection(DATA_SHEET_NAME)
         if ws:
             rows_to_add = []
             tz = pytz.timezone('Asia/Bangkok')
             ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
             for item in data_list:
-                # เพิ่ม License Plate ลงใน Column สุดท้าย
                 row = [ts, item['user_id'], item['tracking'], item['barcode'], "Normal", 1, item['mode'], item['license_plate']]
                 rows_to_add.append(row)
             ws.append_rows(rows_to_add)
@@ -71,7 +92,7 @@ def save_batch_to_sheet(data_list):
 @st.cache_data(ttl=30) 
 def load_data_from_sheet():
     try:
-        ws = get_sheet_connection()
+        ws = get_sheet_connection(DATA_SHEET_NAME)
         if ws:
             data = ws.get_all_values()
             if len(data) > 1:
@@ -83,25 +104,20 @@ def load_data_from_sheet():
 
 # --- SESSION STATE ---
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
-if 'license_plate' not in st.session_state: st.session_state.license_plate = "" # เก็บทะเบียนรถ
+if 'license_plate' not in st.session_state: st.session_state.license_plate = "" 
 if 'staged_data' not in st.session_state: st.session_state.staged_data = [] 
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
 if 'scan_error' not in st.session_state: st.session_state.scan_error = None 
-if 'play_sound' not in st.session_state: st.session_state.play_sound = None # State สำหรับเล่นเสียง
+if 'play_sound' not in st.session_state: st.session_state.play_sound = None 
 
 # --- SOUND SYSTEM ---
 def play_audio_feedback():
-    """ฟังก์ชันเล่นเสียง (ซ่อน Player ไว้)"""
     if st.session_state.play_sound == 'success':
-        # เสียง Beep สั้น
         sound_url = "https://www.soundjay.com/buttons/sounds/button-16.mp3"
         st.audio(sound_url, format="audio/mp3", autoplay=True)
     elif st.session_state.play_sound == 'error':
-        # เสียง Buzzer เตือนภัย
         sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
         st.audio(sound_url, format="audio/mp3", autoplay=True)
-    
-    # Reset เพื่อไม่ให้เล่นซ้ำตอน Refresh หน้า
     st.session_state.play_sound = None
 
 # --- DUPLICATE CHECK FUNCTION ---
@@ -134,25 +150,24 @@ def add_to_staging(tracking, barcode, mode):
     
     if is_dup:
         st.session_state.scan_error = msg 
-        st.session_state.play_sound = 'error' # 🔊 Trigger Error Sound
+        st.session_state.play_sound = 'error' 
         st.toast(msg, icon="🚫") 
         return 
     
-    # ถ้าทะเบียนรถว่าง ให้แจ้งเตือน (แต่ไม่บล็อกการทำงาน หรือจะบล็อกก็ได้)
     if not st.session_state.license_plate:
         st.toast("⚠️ อย่าลืมระบุทะเบียนรถ!", icon="🚛")
 
     new_item = {
         "id": str(uuid.uuid4()), 
         "user_id": st.session_state.user_id,
-        "license_plate": st.session_state.license_plate, # บันทึกทะเบียนรถ
+        "license_plate": st.session_state.license_plate, 
         "tracking": tracking,
         "barcode": barcode,
         "mode": mode,
         "time_scan": datetime.now().strftime("%H:%M:%S")
     }
     st.session_state.staged_data.insert(0, new_item)
-    st.session_state.play_sound = 'success' # 🔊 Trigger Success Sound
+    st.session_state.play_sound = 'success' 
     st.toast(f"📥 เพิ่มรายการ: {tracking}", icon="➕")
 
 def delete_from_staging(item_id):
@@ -196,21 +211,33 @@ def confirm_save_all():
 
 # --- MAIN APP ---
 st.title("📦 MKP Scan & Pack (Pro)")
-
-# เรียกฟังก์ชันเล่นเสียง (ทำงานแบบ Background)
 play_audio_feedback()
 
+# --- LOGIN SECTION (UPDATED) ---
 if not st.session_state.user_id:
-    st.info("ระบุรหัสพนักงาน")
-    u = st.text_input("User ID", key="login")
-    if st.button("Start") and u: st.session_state.user_id = u; st.rerun()
+    st.info("🔒 กรุณาสแกนรหัสพนักงาน")
+    u_input = st.text_input("User ID", key="login")
+    
+    if st.button("Start / Login"):
+        if u_input:
+            with st.spinner("🔍 กำลังตรวจสอบสิทธิ์..."):
+                if check_user_exists(u_input):
+                    st.session_state.user_id = u_input
+                    st.toast(f"ยินดีต้อนรับ {u_input}", icon="✅")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error(f"❌ ไม่พบรหัสพนักงาน: '{u_input}' ในระบบ")
+                    st.warning("กรุณาติดต่อ Admin หรือลองสแกนใหม่อีกครั้ง")
+        else:
+            st.warning("กรุณากรอกรหัสพนักงาน")
+
 else:
-    # --- SIDEBAR: Login Info & Vehicle ---
+    # --- LOGGED IN CONTENT ---
     with st.sidebar:
         st.write(f"👤 **{st.session_state.user_id}**")
         st.markdown("---")
         
-        # 🚛 ส่วน Scan ทะเบียนรถ (Global Setting)
         st.subheader("🚛 ข้อมูลรถขนส่ง")
         st.text_input("ทะเบียนรถ (Vehicle ID)", key="license_plate", help="ระบุทะเบียนรถเพื่องานรอบนี้")
         if st.session_state.license_plate:
@@ -280,7 +307,6 @@ else:
 
         if count_waiting > 0:
             with st.container(border=True):
-                # ปรับ Header เพิ่มทะเบียนรถให้เห็นด้วย
                 h1, h2, h3, h4, h5 = st.columns([1, 2, 3, 3, 1])
                 h1.markdown("**เวลา**")
                 h2.markdown("**ทะเบียนรถ**")
@@ -292,7 +318,7 @@ else:
                 for item in st.session_state.staged_data:
                     c1, c2, c3, c4, c5 = st.columns([1, 2, 3, 3, 1])
                     c1.caption(item['time_scan'])
-                    c2.caption(item['license_plate']) # แสดงทะเบียนรถ
+                    c2.caption(item['license_plate']) 
                     c3.write(item['tracking'])
                     c4.write(item['barcode'])
                     c5.button("❌", key=f"del_{item['id']}", on_click=delete_from_staging, args=(item['id'],))
