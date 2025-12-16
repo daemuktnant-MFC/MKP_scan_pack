@@ -67,13 +67,18 @@ def save_batch_to_sheet(data_list):
         return False
     return False
 
-@st.cache_data(ttl=30) # Cache 30 วินาที เพื่อไม่ให้โหลดหนักเกินไป
+# --- แก้ไข 1: เพิ่มฟังก์ชัน Clear Cache ---
+@st.cache_data(ttl=30) 
 def load_data_from_sheet():
     try:
         ws = get_sheet_connection()
         if ws:
             data = ws.get_all_values()
-            if len(data) > 1: return pd.DataFrame(data[1:], columns=data[0])
+            if len(data) > 1:
+                df = pd.DataFrame(data[1:], columns=data[0])
+                # --- แก้ไข 2: ตัดช่องว่างชื่อหัวตารางออก (Trim Headers) ---
+                df.columns = df.columns.str.strip()
+                return df
     except: pass
     return pd.DataFrame()
 
@@ -81,7 +86,7 @@ def load_data_from_sheet():
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
 if 'staged_data' not in st.session_state: st.session_state.staged_data = [] 
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
-if 'scan_error' not in st.session_state: st.session_state.scan_error = None # เก็บข้อความ Error ล่าสุด
+if 'scan_error' not in st.session_state: st.session_state.scan_error = None 
 
 # --- DUPLICATE CHECK FUNCTION ---
 def check_duplicate(tracking):
@@ -90,40 +95,49 @@ def check_duplicate(tracking):
     """
     # 1. เช็คใน Staging (รายการที่รอบันทึก)
     for item in st.session_state.staged_data:
-        if item['tracking'] == tracking:
+        if str(item['tracking']).strip() == str(tracking).strip():
             return True, f"⚠️ ซ้ำในรายการรอ! ({tracking})"
 
     # 2. เช็คใน Google Sheet (Database)
     df = load_data_from_sheet()
     if not df.empty:
-        # พยายามหา Column ที่เก็บ Tracking ID (รองรับทั้งชื่อ 'Tracking ID' และ 'Order ID')
+        # พยายามหา Column ที่เก็บ Tracking ID
         target_col = None
-        if 'Tracking ID' in df.columns: target_col = 'Tracking ID'
-        elif 'Order ID' in df.columns: target_col = 'Order ID'
-        elif 'Tracking' in df.columns: target_col = 'Tracking'
+        # รายชื่อ Column ที่เป็นไปได้
+        possible_cols = ['Tracking ID', 'Order ID', 'Tracking', 'tracking_id', 'order_id']
+        
+        for col in df.columns:
+            if col in possible_cols:
+                target_col = col
+                break
         
         if target_col:
             # แปลงเป็น String และ Trim ช่องว่างเพื่อความชัวร์
             all_trackings = df[target_col].astype(str).str.strip().values
-            if tracking in all_trackings:
+            if str(tracking).strip() in all_trackings:
                 return True, f"⛔ เคยบันทึกไปแล้ว! ({tracking})"
+        else:
+            # กรณีหา Column ไม่เจอ ให้แจ้งเตือนเล็กน้อย (Optional debug)
+            # st.toast(f"หา Column Tracking ไม่เจอใน Sheet: {list(df.columns)}", icon="❓")
+            pass
 
     return False, ""
 
 # --- CALLBACKS ---
 def add_to_staging(tracking, barcode, mode):
-    # Reset Error ก่อนเริ่มเช็ค
     st.session_state.scan_error = None
     
-    # Check Duplicate
+    # Trim ค่าก่อนเช็ค
+    tracking = tracking.strip()
+    barcode = barcode.strip()
+
     is_dup, msg = check_duplicate(tracking)
     
     if is_dup:
-        st.session_state.scan_error = msg # แสดง Error บนหน้าจอ
-        st.toast(msg, icon="🚫") # แจ้งเตือนแบบ Toast
-        return # หยุดการทำงาน ไม่เพิ่มลงรายการ
+        st.session_state.scan_error = msg 
+        st.toast(msg, icon="🚫") 
+        return 
         
-    # ถ้าไม่ซ้ำ ก็เพิ่มตามปกติ
     new_item = {
         "id": str(uuid.uuid4()), 
         "user_id": st.session_state.user_id,
@@ -166,7 +180,11 @@ def confirm_save_all():
         if success:
             st.success("✅ บันทึกข้อมูลลง Google Sheet เรียบร้อย!")
             st.session_state.staged_data = [] 
-            st.session_state.scan_error = None # เคลียร์ Error ค้าง
+            st.session_state.scan_error = None 
+            
+            # --- แก้ไข 3: สั่งล้าง Cache ทันที เพื่อให้การเช็คซ้ำครั้งต่อไปเป็นข้อมูลล่าสุด ---
+            load_data_from_sheet.clear()
+            
             st.balloons()
             time.sleep(1)
             st.rerun()
@@ -191,10 +209,8 @@ else:
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
 
     with tab1:
-        # === แสดง Error Box ใหญ่ๆ ถ้ามี Error ===
         if st.session_state.scan_error:
             st.markdown(f'<div class="error-box">{st.session_state.scan_error}</div>', unsafe_allow_html=True)
-            # ปุ่มปิด Error manual (เผื่อมันค้าง)
             if st.button("ปิดแจ้งเตือน"): 
                 st.session_state.scan_error = None
                 st.rerun()
@@ -262,10 +278,12 @@ else:
             st.caption("ยังไม่มีรายการสแกน... (สแกนเพื่อเพิ่มรายการ)")
 
     with tab2:
-        if st.button("🔄 Refresh Data"): st.cache_data.clear(); st.rerun()
+        if st.button("🔄 Refresh Data"): 
+            load_data_from_sheet.clear() # Clear Cache ปุ่ม Refresh ด้วย
+            st.rerun()
+            
         df = load_data_from_sheet()
         if not df.empty:
-            # เปลี่ยน Label ตอนแสดงผลให้สวยงาม
             display_cols = df.columns.tolist()
             if 'Order ID' in display_cols: 
                 df.rename(columns={'Order ID': 'Tracking ID'}, inplace=True)
