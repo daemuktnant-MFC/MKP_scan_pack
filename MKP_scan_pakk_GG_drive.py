@@ -56,10 +56,8 @@ def check_user_exists(user_id):
     try:
         ws = get_sheet_connection(USER_SHEET_NAME)
         if ws:
-            # --- แก้ไขจุดนี้: เปลี่ยนเลข 1 เป็น 2 เพื่อเช็ค Column B ---
+            # เช็ค Column B (คอลัมน์ที่ 2)
             existing_users = ws.col_values(2) 
-            
-            # แปลงเป็น String และ Trim ช่องว่าง
             clean_users = [str(u).strip() for u in existing_users]
             
             if str(user_id).strip() in clean_users:
@@ -201,9 +199,14 @@ def confirm_save_all():
         
         if success:
             st.success("✅ บันทึกข้อมูลลง Google Sheet เรียบร้อย!")
-            st.session_state.staged_data = [] 
-            st.session_state.scan_error = None 
-            load_data_from_sheet.clear()
+            
+            # --- CLEAR DATA SECTION ---
+            st.session_state.staged_data = []      # ล้างรายการที่พักไว้
+            st.session_state.scan_error = None     # ล้าง Error
+            st.session_state.license_plate = ""    # 🔥 ล้างทะเบียนรถ (ต้องกรอกใหม่)
+            st.session_state.locked_barcode = ""   # 🔥 ล้างสินค้าต้นแบบ (Mode A ต้องสแกนใหม่)
+            
+            load_data_from_sheet.clear() # ล้าง Cache
             st.balloons()
             time.sleep(1)
             st.rerun()
@@ -240,7 +243,9 @@ else:
         st.markdown("---")
         
         st.subheader("🚛 ข้อมูลรถขนส่ง")
+        # ผูกตัวแปร session_state.license_plate กับ input
         st.text_input("ทะเบียนรถ (Vehicle ID)", key="license_plate", help="ระบุทะเบียนรถเพื่องานรอบนี้")
+        
         if st.session_state.license_plate:
             st.success(f"รถ: {st.session_state.license_plate}")
         else:
