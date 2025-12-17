@@ -10,7 +10,7 @@ import uuid
 from PIL import Image
 import io
 
-# --- IMPORT LIBRARY กล้อง ---
+# --- IMPORT LIBRARY ---
 try:
     from streamlit_back_camera_input import back_camera_input
     from pyzbar.pyzbar import decode
@@ -31,26 +31,28 @@ st.markdown("""
 <style>
 div.block-container { padding-top: 1rem; padding-bottom: 2rem; }
 .user-header {
-    background-color: #f0f2f6;
-    padding: 15px;
-    border-radius: 10px;
-    margin-bottom: 20px;
-    border: 1px solid #dce4ef;
+    background-color: #f0f2f6; padding: 15px; border-radius: 10px;
+    margin-bottom: 15px; border: 1px solid #dce4ef;
+}
+.scan-stage-box {
+    background-color: #e3f2fd; padding: 15px; border-radius: 10px;
+    border: 2px solid #2196f3; text-align: center; margin-bottom: 10px;
 }
 .vehicle-box {
-    background-color: #e8f5e9; 
-    padding: 15px;
-    border-radius: 10px;
-    border: 1px solid #c8e6c9;
-    margin-bottom: 10px;
+    background-color: #e8f5e9; padding: 10px; border-radius: 8px;
+    border: 1px solid #c8e6c9; margin-bottom: 10px;
 }
-.big-font { font-size: 20px !important; font-weight: bold; }
-
-/* CSS Hack สำหรับกล้อง */
+/* กล้องใหญ่ขึ้น */
 iframe[title="streamlit_back_camera_input.back_camera_input"] {
-    min-height: 250px !important; 
-    height: 100% !important;
+    min-height: 300px !important; height: 100% !important;
 }
+.status-step {
+    font-size: 1.2rem; font-weight: bold; padding: 10px;
+    border-radius: 5px; margin: 5px 0;
+}
+.step-pending { background-color: #f5f5f5; color: #9e9e9e; border: 1px dashed #bdbdbd; }
+.step-done { background-color: #d1c4e9; color: #512da8; border: 1px solid #673ab7; }
+.step-active { background-color: #bbdefb; color: #0d47a1; border: 2px solid #1976d2; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,12 +81,10 @@ def verify_user_login(user_id):
             if not all_records: return False, None
             headers = all_records[0]
             target_id = str(user_id).strip()
-            
-            name_col_idx = 2 # Default C
+            name_col_idx = 2 
             for i, h in enumerate(headers):
                 if "name" in str(h).lower() or "ชื่อ" in str(h).lower():
                     name_col_idx = i; break
-
             for row in all_records:
                 while len(row) <= max(1, name_col_idx): row.append("")
                 if str(row[1]).strip() == target_id:
@@ -121,42 +121,32 @@ def load_data_from_sheet():
     except: pass
     return pd.DataFrame()
 
-# --- INIT SESSION STATE ---
+# --- INIT SESSION ---
 def init_session_state():
     keys = {
-        'user_id': "",
-        'user_name': "",
-        'staged_data': [],
-        'locked_barcode': "",
-        'scan_error': None,
-        'play_sound': None,
-        'reset_key': 0,
-        'cam_counter': 0, 
-        'temp_tracking_b': "",
-        'temp_barcode_b': ""
+        'user_id': "", 'user_name': "", 'staged_data': [],
+        'locked_barcode': "", 'scan_error': None, 'play_sound': None,
+        'reset_key': 0, 'cam_counter': 0,
+        # Variables for Central Scanner
+        'scan_step': 1,  # 1=Track, 2=Prod
+        'temp_track': "",
+        'temp_prod': ""
     }
     for k, v in keys.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+        if k not in st.session_state: st.session_state[k] = v
 
 init_session_state()
 
-# --- HELPER: DECODE IMAGE ---
+# --- HELPERS ---
 def process_camera_scan(image_input):
-    """ฟังก์ชันช่วยแปลงภาพเป็น Text"""
     if image_input:
         try:
             img = Image.open(image_input)
             decoded_objects = decode(img)
-            if decoded_objects:
-                val = decoded_objects[0].data.decode("utf-8")
-                # st.toast(f"Scan สำเร็จ: {val}", icon="📷") # Debug
-                return val
-        except Exception as e:
-            st.error(f"Error decoding: {e}")
+            if decoded_objects: return decoded_objects[0].data.decode("utf-8")
+        except: pass
     return None
 
-# --- SOUND ---
 def play_audio_feedback():
     if st.session_state.play_sound == 'success':
         st.audio("https://www.soundjay.com/buttons/sounds/button-16.mp3", format="audio/mp3", autoplay=True)
@@ -180,271 +170,221 @@ def check_duplicate(tracking):
 
 def add_to_staging(tracking, barcode, mode, license_plate):
     st.session_state.scan_error = None
-    if not tracking or not barcode: return
-
     is_dup, msg = check_duplicate(tracking)
     if is_dup:
         st.session_state.scan_error = msg
         st.session_state.play_sound = 'error'
         st.toast(msg, icon="🚫")
-        return
+        return False # Add fail
 
     if not license_plate:
         st.toast("⚠️ กรุณาระบุทะเบียนรถ", icon="🚛")
 
     new_item = {
-        "id": str(uuid.uuid4()),
-        "user_id": st.session_state.user_id,
-        "user_name": st.session_state.user_name,
-        "license_plate": license_plate,
-        "tracking": tracking,
-        "barcode": barcode,
-        "mode": mode,
-        "time_scan": datetime.now().strftime("%H:%M:%S")
+        "id": str(uuid.uuid4()), "user_id": st.session_state.user_id, "user_name": st.session_state.user_name,
+        "license_plate": license_plate, "tracking": tracking, "barcode": barcode,
+        "mode": mode, "time_scan": datetime.now().strftime("%H:%M:%S")
     }
     st.session_state.staged_data.insert(0, new_item)
     st.session_state.play_sound = 'success'
     st.toast(f"📥 เพิ่ม: {tracking}", icon="➕")
+    return True # Add success
 
 def delete_staging(item_id):
     st.session_state.staged_data = [d for d in st.session_state.staged_data if d['id'] != item_id]
 
 def logout_callback():
-    st.session_state.user_id = ""
-    st.session_state.user_name = ""
-    st.session_state.staged_data = []
-    st.session_state.locked_barcode = ""
-    st.session_state.reset_key += 1 
-    st.session_state.cam_counter += 1
-    st.session_state.temp_tracking_b = ""
-    st.session_state.temp_barcode_b = ""
+    for k in ['user_id', 'user_name', 'staged_data', 'locked_barcode', 'temp_track', 'temp_prod']:
+        st.session_state[k] = "" if isinstance(st.session_state[k], str) else []
+    st.session_state.reset_key += 1; st.session_state.cam_counter += 1
+    st.session_state.scan_step = 1
     load_data_from_sheet.clear()
 
 def save_callback():
     if not st.session_state.staged_data: return
     with st.spinner("Saving..."):
         if save_batch_to_sheet(st.session_state.staged_data[::-1]):
-            st.success("✅ บันทึกสำเร็จ")
-            st.session_state.staged_data = []
-            st.session_state.scan_error = None
-            st.session_state.locked_barcode = ""
-            st.session_state.reset_key += 1
-            st.session_state.cam_counter += 1
-            load_data_from_sheet.clear()
-            st.balloons()
-            time.sleep(1)
-        else:
-            st.error("Save Failed")
+            st.success("✅ บันทึกสำเร็จ"); st.session_state.staged_data = []
+            st.session_state.reset_key += 1; st.session_state.cam_counter += 1
+            st.session_state.scan_step = 1; st.session_state.temp_track = ""; st.session_state.temp_prod = ""
+            load_data_from_sheet.clear(); st.balloons(); time.sleep(1)
+        else: st.error("Save Failed")
+
+# --- CENTRAL SCAN LOGIC ---
+def handle_scan_mode_b(scanned_val, current_lp):
+    # Step 1: Tracking
+    if st.session_state.scan_step == 1:
+        st.session_state.temp_track = scanned_val
+        st.session_state.scan_step = 2 # Move to next step
+        st.session_state.cam_counter += 1
+        st.rerun()
+    
+    # Step 2: Barcode
+    elif st.session_state.scan_step == 2:
+        st.session_state.temp_prod = scanned_val
+        # Auto Save Logic
+        if st.session_state.temp_track and st.session_state.temp_prod:
+            success = add_to_staging(st.session_state.temp_track, st.session_state.temp_prod, "Mode B", current_lp)
+            if success:
+                # Reset loop
+                st.session_state.temp_track = ""
+                st.session_state.temp_prod = ""
+                st.session_state.scan_step = 1
+            else:
+                # If error (dup), maybe reset or keep? Let's reset for safety
+                st.session_state.scan_step = 1
+                st.session_state.temp_track = ""
+                st.session_state.temp_prod = ""
+        
+        st.session_state.cam_counter += 1
+        st.rerun()
+
+def handle_scan_mode_a(scanned_val, current_lp):
+    # Mode A: If locked empty -> Lock it. If locked -> Add as Tracking
+    if not st.session_state.locked_barcode:
+        st.session_state.locked_barcode = scanned_val
+        st.session_state.cam_counter += 1
+        st.rerun()
+    else:
+        # It's a tracking
+        add_to_staging(scanned_val, st.session_state.locked_barcode, "Mode A", current_lp)
+        st.session_state.cam_counter += 1
+        st.rerun()
 
 # ================= MAIN APP =================
-st.title("📦 MKP Scan & Pack (Pro + Camera)")
+st.title("📦 MKP Scan (One-Stop)")
 play_audio_feedback()
 
-# --- 1. LOGIN SCREEN ---
+# --- LOGIN ---
 if not st.session_state.user_id:
     c1, c2, c3 = st.columns([1,2,1])
     with c2:
         st.info("🔒 กรุณาสแกนรหัสพนักงาน")
-        
-        # Manual Input
-        u_in = st.text_input("User ID (พิมพ์)", key="login_input")
-        
-        # Camera Input
         cam_key = f"cam_login_{st.session_state.cam_counter}"
-        login_img = back_camera_input("แตะเพื่อเปิดกล้องสแกน", key=cam_key)
+        login_img = back_camera_input("แตะเพื่อสแกนบัตร", key=cam_key)
+        scanned_id = process_camera_scan(login_img)
         
-        # Logic Check
-        final_user_id = None
-        if u_in: 
-            final_user_id = u_in
-        elif login_img:
-            # ถ้ามีภาพจากกล้อง ให้ถอดรหัส
-            scanned_text = process_camera_scan(login_img)
-            if scanned_text:
-                final_user_id = scanned_text
+        if scanned_id:
+            found, name = verify_user_login(scanned_id)
+            if found:
+                st.session_state.user_id = scanned_id; st.session_state.user_name = name
+                st.session_state.cam_counter += 1; st.rerun()
+            else: st.error("❌ ไม่พบรหัสพนักงาน")
         
-        if st.button("เข้าสู่ระบบ (Login)", use_container_width=True) or (final_user_id and not u_in):
-            # ถ้ามี ID จากช่องพิมพ์ หรือ จากกล้อง ให้ Login เลย
-            if final_user_id:
-                found, name = verify_user_login(final_user_id)
-                if found:
-                    st.session_state.user_id = final_user_id
-                    st.session_state.user_name = name
-                    st.session_state.cam_counter += 1 # Reset กล้อง
-                    st.rerun()
-                else:
-                    st.error("❌ ไม่พบรหัสพนักงาน")
-            else:
-                st.warning("กรุณาระบุรหัสพนักงาน")
+        # Manual fallback
+        u_in = st.text_input("หรือพิมพ์รหัส", key="login_input")
+        if st.button("Login") and u_in:
+             found, name = verify_user_login(u_in)
+             if found:
+                st.session_state.user_id = u_in; st.session_state.user_name = name
+                st.rerun()
 else:
-    # --- 2. MAIN SCREEN ---
+    # --- WORKSPACE ---
     with st.container():
         st.markdown(f"""
         <div class="user-header">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <span style="font-size:1.1rem; font-weight:bold;">👤 {st.session_state.user_name}</span>
-                    <span style="color:gray; font-size:0.9rem;"> (ID: {st.session_state.user_id})</span>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        col_null, col_out = st.columns([4, 1])
-        with col_out:
-            st.button("🚪 Logout", on_click=logout_callback, use_container_width=True)
+            <b>👤 {st.session_state.user_name}</b> ({st.session_state.user_id})
+        </div>""", unsafe_allow_html=True)
+        col_nul, col_out = st.columns([4,1])
+        with col_out: st.button("🚪 Logout", on_click=logout_callback, use_container_width=True)
 
-    t1, t2 = st.tabs(["📝 Scan Work", "📊 History"])
+    t1, t2 = st.tabs(["📷 Scan Center", "📊 History"])
 
     with t1:
-        # === A. Vehicle Input ===
+        # 1. Vehicle
         st.markdown('<div class="vehicle-box">', unsafe_allow_html=True)
         c_v1, c_v2 = st.columns([1, 4])
         with c_v1: st.markdown("### 🚛")
         with c_v2:
-            current_lp = st.text_input("ทะเบียนรถ (Vehicle ID)", 
-                                     placeholder="ระบุทะเบียนรถ...", 
-                                     key=f"lp_{st.session_state.reset_key}")
+            current_lp = st.text_input("ทะเบียนรถ", placeholder="ระบุทะเบียน...", key=f"lp_{st.session_state.reset_key}")
         st.markdown('</div>', unsafe_allow_html=True)
 
         if st.session_state.scan_error:
             st.error(st.session_state.scan_error)
-            if st.button("ปิดแจ้งเตือน"): 
-                st.session_state.scan_error = None; st.rerun()
+            if st.button("ล้างข้อความ"): st.session_state.scan_error = None; st.rerun()
 
-        # === B. Scan Section ===
-        mode = st.radio("รูปแบบงาน:", ["🚀 สินค้าเดียว -> หลาย Tracking", "📦 งานปกติ (จับคู่)"], horizontal=True)
+        # 2. Mode Selection
+        mode = st.radio("โหมดการทำงาน:", ["🚀 สินค้าเดียว (Mode A)", "📦 จับคู่ (Mode B)"], horizontal=True)
+        
+        # ================= CENTRAL SCANNER UI =================
         st.divider()
+        
+        if "Mode A" in mode:
+            # UI Status for Mode A
+            if not st.session_state.locked_barcode:
+                st.info("🟡 สถานะ: รอสแกนสินค้าต้นแบบ")
+                cam_label = "📸 สแกนสินค้าต้นแบบ"
+            else:
+                st.success(f"🔒 สินค้า: {st.session_state.locked_barcode}")
+                st.info("🟢 สถานะ: พร้อมสแกน Tracking (ยิงรัวได้เลย)")
+                cam_label = "📸 สแกน Tracking"
+                if st.button("เปลี่ยนสินค้าต้นแบบ"):
+                    st.session_state.locked_barcode = ""; st.rerun()
 
-        if "สินค้าเดียว" in mode:
-            # === MODE A: Master Product -> Multi Tracking ===
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                mbc_key_txt = f"mbc_txt_{st.session_state.reset_key}" 
-                if not st.session_state.locked_barcode:
-                    mbc = st.text_input("1. สแกนสินค้าต้นแบบ", key=mbc_key_txt)
-                    
-                    # 2. Camera Input
-                    with st.expander("📷 เปิดกล้อง (สแกนสินค้า)"):
-                         cam_key_A1 = f"cam_A1_{st.session_state.cam_counter}"
-                         img_A1 = back_camera_input(key=cam_key_A1)
-                    
-                    scanned_val = None
-                    if mbc: scanned_val = mbc
-                    elif img_A1: scanned_val = process_camera_scan(img_A1)
-
-                    if scanned_val: 
-                        st.session_state.locked_barcode = scanned_val
-                        st.session_state.cam_counter += 1
-                        st.rerun()
-                else:
-                    st.success(f"🔒 สินค้า: **{st.session_state.locked_barcode}**")
-            with c2:
-                if st.session_state.locked_barcode:
-                    if st.button("เปลี่ยน"): 
-                        st.session_state.locked_barcode = ""; st.rerun()
-            
-            if st.session_state.locked_barcode:
-                col_trk_inp, col_trk_cam = st.columns([3, 1])
-                scan_val_A2 = None
-                with col_trk_inp:
-                    with st.form("form_a", clear_on_submit=True):
-                        val_a = st.text_input("2. ยิง Tracking ID")
-                        submitted_a = st.form_submit_button("เพิ่มรายการ")
-                        if submitted_a and val_a: scan_val_A2 = val_a
-
-                with col_trk_cam:
-                     with st.popover("📷"):
-                        st.write("สแกน Tracking")
-                        cam_key_A2 = f"cam_A2_{st.session_state.cam_counter}"
-                        img_A2 = back_camera_input(key=cam_key_A2)
-                        if img_A2: scan_val_A2 = process_camera_scan(img_A2)
-
-                if scan_val_A2:
-                    add_to_staging(scan_val_A2, st.session_state.locked_barcode, "Mode A", current_lp)
-                    st.session_state.cam_counter += 1
-                    st.rerun()
+            # The Camera
+            img_input = back_camera_input(cam_label, key=f"cam_A_{st.session_state.cam_counter}")
+            res = process_camera_scan(img_input)
+            if res: handle_scan_mode_a(res, current_lp)
 
         else:
-            # === MODE B: Tracking <-> Barcode (AUTO SAVE FIXED) ===
-            
-            # 1. รับค่าจากการพิมพ์/สแกน (Input Processing)
-            # เราใช้ Session State (temp_...) เป็นตัวกลาง
-            
-            # --- Tracking Section ---
-            st.markdown("**1. Tracking ID**")
-            c_t1, c_t2 = st.columns([3, 1])
-            with c_t1:
-                # Manual Input
-                def on_track_change(): st.session_state.temp_tracking_b = st.session_state.input_track_b
-                st.text_input("Scan/Key Tracking", key="input_track_b", value=st.session_state.temp_tracking_b, on_change=on_track_change)
-            with c_t2:
-                # Camera Input
-                with st.popover("📷 Track"):
-                    cam_key_B1 = f"cam_B1_{st.session_state.cam_counter}"
-                    img_B1 = back_camera_input(key=cam_key_B1)
-                    if img_B1:
-                         res = process_camera_scan(img_B1)
-                         if res and res != st.session_state.temp_tracking_b:
-                             st.session_state.temp_tracking_b = res
-                             st.rerun()
-
-            # --- Barcode Section ---
-            st.markdown("**2. Product Barcode**")
-            c_p1, c_p2 = st.columns([3, 1])
-            with c_p1:
-                 # Manual Input
-                 def on_prod_change(): st.session_state.temp_barcode_b = st.session_state.input_prod_b
-                 st.text_input("Scan/Key Barcode", key="input_prod_b", value=st.session_state.temp_barcode_b, on_change=on_prod_change)
-            with c_p2:
-                 # Camera Input
-                 with st.popover("📷 Prod"):
-                    cam_key_B2 = f"cam_B2_{st.session_state.cam_counter}"
-                    img_B2 = back_camera_input(key=cam_key_B2)
-                    if img_B2:
-                         res = process_camera_scan(img_B2)
-                         if res and res != st.session_state.temp_barcode_b:
-                             st.session_state.temp_barcode_b = res
-                             st.rerun()
-
-            # --- 3. AUTO CHECK & SAVE LOGIC (อยู่นอกเงื่อนไขกล้อง) ---
-            # เช็คว่ามีค่าครบทั้ง 2 ตัวแปรหรือยัง
-            if st.session_state.temp_tracking_b and st.session_state.temp_barcode_b:
-                # ถ้าครบ ให้บันทึกเลย
-                add_to_staging(st.session_state.temp_tracking_b, st.session_state.temp_barcode_b, "Mode B", current_lp)
-                
-                # เคลียร์ค่าทิ้ง
-                st.session_state.temp_tracking_b = ""
-                st.session_state.temp_barcode_b = ""
-                
-                # รีเซ็ตกล้อง
-                st.session_state.cam_counter += 1
-                st.rerun()
-
-            # --- Manual Add Button (กรณีพิมพ์มือแล้วไม่ Auto) ---
-            if st.button("➕ เพิ่มรายการ (Manual)", use_container_width=True):
-                if st.session_state.temp_tracking_b and st.session_state.temp_barcode_b:
-                    add_to_staging(st.session_state.temp_tracking_b, st.session_state.temp_barcode_b, "Mode B", current_lp)
-                    st.session_state.temp_tracking_b = ""
-                    st.session_state.temp_barcode_b = ""
-                    st.rerun()
+            # === MODE B: SEQUENTIAL SCANNING ===
+            # Visual Step Indicator
+            c_s1, c_s2 = st.columns(2)
+            with c_s1:
+                # Tracking Box
+                if st.session_state.scan_step == 1:
+                    st.markdown(f'<div class="status-step step-active">1. รอสแกน Tracking ⏳</div>', unsafe_allow_html=True)
                 else:
-                    st.warning("กรุณากรอกให้ครบทั้ง 2 ช่อง")
+                    st.markdown(f'<div class="status-step step-done">Tracking: {st.session_state.temp_track} ✅</div>', unsafe_allow_html=True)
+            
+            with c_s2:
+                # Product Box
+                if st.session_state.scan_step == 1:
+                    st.markdown(f'<div class="status-step step-pending">2. รอ Barcode</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="status-step step-active">2. รอสแกน Barcode ⏳</div>', unsafe_allow_html=True)
 
-        # === C. Staging Table ===
+            # Control Buttons
+            if st.session_state.scan_step == 2:
+                if st.button("❌ ยกเลิก/เริ่มใหม่"):
+                    st.session_state.scan_step = 1
+                    st.session_state.temp_track = ""
+                    st.session_state.temp_prod = ""
+                    st.rerun()
+
+            # The Camera (Dynamic Label)
+            if st.session_state.scan_step == 1:
+                cam_label = "📸 สแกน Tracking ID"
+            else:
+                cam_label = "📸 สแกน Barcode สินค้า"
+
+            img_input = back_camera_input(cam_label, key=f"cam_B_{st.session_state.cam_counter}")
+            res = process_camera_scan(img_input)
+            if res: handle_scan_mode_b(res, current_lp)
+
+            # Manual Input Fallback (อยู่ด้านล่างเผื่อกล้องเสีย)
+            with st.expander("⌨️ พิมพ์เอง (กรณีกล้องมีปัญหา)"):
+                with st.form("manual_b_form", clear_on_submit=True):
+                    m_track = st.text_input("Tracking")
+                    m_prod = st.text_input("Barcode")
+                    if st.form_submit_button("บันทึก"):
+                        if m_track and m_prod:
+                            add_to_staging(m_track, m_prod, "Mode B", current_lp)
+                            st.rerun()
+
+        # ================= STAGING AREA =================
         st.markdown("---")
         cnt = len(st.session_state.staged_data)
         
         c_h1, c_h2 = st.columns([3, 1])
-        with c_h1: st.subheader(f"📋 รายการรอบันทึก ({cnt})")
+        with c_h1: st.subheader(f"📋 รายการรอ ({cnt})")
         with c_h2:
-            if cnt > 0:
-                st.button(f"☁️ ยืนยันบันทึก ({cnt})", type="primary", use_container_width=True, on_click=save_callback)
+            if cnt > 0: st.button(f"☁️ บันทึก ({cnt})", type="primary", use_container_width=True, on_click=save_callback)
 
         if cnt > 0:
             with st.container(border=True):
                 cols = st.columns([1, 2, 3, 3, 1])
-                headers = ["เวลา", "ทะเบียน", "Tracking", "Barcode", "ลบ"]
-                for col, h in zip(cols, headers): col.markdown(f"**{h}**")
+                for col, h in zip(cols, ["เวลา", "ทะเบียน", "Tracking", "Barcode", "ลบ"]): col.markdown(f"**{h}**")
                 st.divider()
                 for item in st.session_state.staged_data:
                     c1, c2, c3, c4, c5 = st.columns([1, 2, 3, 3, 1])
@@ -455,9 +395,6 @@ else:
                     c5.button("❌", key=f"d_{item['id']}", on_click=delete_staging, args=(item['id'],))
 
     with t2:
-        if st.button("🔄 Refresh"): 
-            load_data_from_sheet.clear()
-            st.rerun()
+        if st.button("🔄 Refresh"): load_data_from_sheet.clear(); st.rerun()
         df = load_data_from_sheet()
-        if not df.empty:
-            st.dataframe(df.tail(15), use_container_width=True)
+        if not df.empty: st.dataframe(df.tail(15), use_container_width=True)
