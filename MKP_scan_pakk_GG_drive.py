@@ -15,7 +15,6 @@ try:
     from streamlit_back_camera_input import back_camera_input
     from pyzbar.pyzbar import decode
 except ImportError:
-    st.error("⚠️ กรุณาติดตั้ง library: streamlit-back-camera-input, pyzbar, Pillow")
     st.stop()
 
 # --- PAGE CONFIG ---
@@ -252,14 +251,14 @@ def handle_scan_mode_a(scanned_val, current_lp):
         st.rerun()
 
 # ================= MAIN APP =================
-st.title("📦 MKP Scan (One-Stop)")
+st.title("📦 MKP Scan")
 play_audio_feedback()
 
 # --- LOGIN ---
 if not st.session_state.user_id:
     c1, c2, c3 = st.columns([1,2,1])
     with c2:
-        st.info("🔒 กรุณาสแกนรหัสพนักงาน")
+        st.info("🔒 สแกนรหัสพนักงาน")
         cam_key = f"cam_login_{st.session_state.cam_counter}"
         login_img = back_camera_input("แตะเพื่อสแกนบัตร", key=cam_key)
         scanned_id = process_camera_scan(login_img)
@@ -304,7 +303,7 @@ else:
             if st.button("ล้างข้อความ"): st.session_state.scan_error = None; st.rerun()
 
         # 2. Mode Selection
-        mode = st.radio("โหมดการทำงาน:", ["🚀 สินค้าเดียว (Mode A)", "📦 จับคู่ (Mode B)"], horizontal=True)
+        mode = st.radio("โหมดการทำงาน:", ["🚀 งาน Lot (Mode A)", "📦 งานเดี่ยว (Mode B)"], horizontal=True)
         
         # ================= CENTRAL SCANNER UI =================
         st.divider()
@@ -312,13 +311,13 @@ else:
         if "Mode A" in mode:
             # UI Status for Mode A
             if not st.session_state.locked_barcode:
-                st.info("🟡 สถานะ: รอสแกนสินค้าต้นแบบ")
-                cam_label = "📸 สแกนสินค้าต้นแบบ"
+                st.info("🟡 สถานะ: รอสแกน UPC")
+                cam_label = "📸 สแกน UPC"
             else:
                 st.success(f"🔒 สินค้า: {st.session_state.locked_barcode}")
-                st.info("🟢 สถานะ: พร้อมสแกน Tracking (ยิงรัวได้เลย)")
+                st.info("🟢 สถานะ: รอสแกน Tracking")
                 cam_label = "📸 สแกน Tracking"
-                if st.button("เปลี่ยนสินค้าต้นแบบ"):
+                if st.button("เปลี่ยน UPC"):
                     st.session_state.locked_barcode = ""; st.rerun()
 
             # The Camera
@@ -362,7 +361,7 @@ else:
             res = process_camera_scan(img_input)
             if res: handle_scan_mode_b(res, current_lp)
 
-            # Manual Input Fallback (อยู่ด้านล่างเผื่อกล้องเสีย)
+            # Manual Input Fallback (ใส่ข้อมูลเพื่อพิมพ์)
             with st.expander("⌨️ พิมพ์เอง (กรณีกล้องมีปัญหา)"):
                 with st.form("manual_b_form", clear_on_submit=True):
                     m_track = st.text_input("Tracking")
