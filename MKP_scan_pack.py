@@ -202,6 +202,7 @@ def add_to_staging(tracking, barcode, mode):
         st.toast(msg, icon="🚫") 
         return 
     
+    # แจ้งเตือนถ้าลืมใส่ทะเบียนรถ (แต่ไม่บล็อก)
     if not st.session_state.license_plate:
         st.toast("⚠️ ยังไม่ระบุทะเบียนรถ!", icon="🚛")
 
@@ -261,6 +262,17 @@ def confirm_save_all():
         else:
             st.error("❌ บันทึกไม่สำเร็จ กรุณาลองใหม่")
 
+# --- (NEW) LOGOUT CALLBACK FUNCTION ---
+def logout_user():
+    """ฟังก์ชัน Logout แบบปลอดภัย (ใช้ใน on_click)"""
+    st.session_state.user_id = ""
+    st.session_state.user_name = ""
+    st.session_state.staged_data = []
+    st.session_state.license_plate = ""
+    st.session_state.locked_barcode = ""
+    st.session_state.scan_error = None
+    load_data_from_sheet.clear()
+
 # --- MAIN APP ---
 st.title("📦 MKP Scan & Pack (Pro)")
 play_audio_feedback()
@@ -298,12 +310,8 @@ else:
         st.caption(f"ID: {st.session_state.user_id}")
         
         st.markdown("---")
-        if st.button("Logout", use_container_width=True): 
-            st.session_state.user_id = ""
-            st.session_state.user_name = ""
-            st.session_state.staged_data = []
-            st.session_state.license_plate = ""
-            st.rerun()
+        # ใช้ on_click เรียกฟังก์ชัน logout_user แทนการเขียน logic ในปุ่ม
+        st.button("Logout", use_container_width=True, on_click=logout_user)
 
     # --- MAIN CONTENT ---
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
