@@ -61,30 +61,47 @@ def get_sheet_connection(sheet_name):
 
 def verify_user_login(user_id):
     """
-    ตรวจสอบ User ID (Col B) และดึง User Name (Col C)
+    ตรวจสอบ User ID (Col B) และดึง User Name (โดยหาจาก Header 'Name' หรือ Col C)
     Return: (bool_found, str_user_name)
     """
     try:
         ws = get_sheet_connection(USER_SHEET_NAME)
         if ws:
-            # ดึงข้อมูลทั้งหมดมาเช็ค
             all_records = ws.get_all_values()
-            target_id = str(user_id).strip()
             
+            if not all_records:
+                st.error("❌ ไม่พบข้อมูลใน Sheet User_MKP")
+                return False, None
+
+            headers = all_records[0] # บรรทัดแรกคือหัวตาราง
+            target_id = str(user_id).strip()
+
+            # --- 1. หา Index ของคอลัมน์ "Name" หรือ "ชื่อ" ---
+            name_col_idx = -1
+            for i, h in enumerate(headers):
+                h_str = str(h).lower()
+                if "name" in h_str or "ชื่อ" in h_str:
+                    name_col_idx = i
+                    break
+            
+            # ถ้าหาหัวตารางไม่เจอ ให้ใช้ Index 2 (Column C) เป็นค่าเริ่มต้น
+            if name_col_idx == -1: 
+                name_col_idx = 2 
+
+            # --- 2. วนลูปหา User ID ใน Column B (Index 1) ---
             for row in all_records:
-                # ตรวจสอบว่าแถวนี้มีความยาวพอที่จะมี Col B ไหม (Index 0, 1)
-                if len(row) >= 2:
-                    current_id = str(row[1]).strip() # Col B = Index 1
-                    
-                    if current_id == target_id:
-                        # เจอ ID แล้ว! ต่อไปหาชื่อใน Col C (Index 2)
-                        if len(row) >= 3:
-                            user_name = str(row[2]).strip()
-                            if not user_name: user_name = "ไม่ระบุชื่อ"
-                        else:
-                            user_name = "Unknown Name" # กรณีไม่มี Col C
-                            
-                        return True, user_name
+                # ป้องกัน Error กรณีแถวสั้นกว่าปกติ (เติมค่าว่างให้ครบ)
+                while len(row) <= max(1, name_col_idx):
+                    row.append("")
+
+                # เช็ค Column B (Index 1) ว่าตรงกับ User ID ไหม
+                current_id = str(row[1]).strip()
+                
+                if current_id == target_id:
+                    # เจอ ID แล้ว! ดึงชื่อจาก Column ที่หาไว้
+                    user_name = str(row[name_col_idx]).strip()
+                    if not user_name: user_name = "ไม่ระบุชื่อ"
+                    return True, user_name
             
             return False, None
         else:
@@ -265,15 +282,15 @@ if not st.session_state.user_id:
                     st.rerun()
                 else:
                     st.error(f"❌ ไม่พบรหัส: '{u_input}' ในระบบ")
-                    st.warning("ตรวจสอบ Sheet: User_MKP คอลัมน์ B และชื่อใน คอลัมน์ C")
+                    st.warning("ตรวจสอบ Sheet: User_MKP คอลัมน์ B และชื่อใน คอลัมน์ Name หรือ C")
         else:
             st.warning("กรุณากรอกรหัสพนักงาน")
 
 else:
-    # --- Check if Name is missing (Legacy Session Fix) ---
+    # --- Check if Name is missing ---
     if not st.session_state.user_name:
-        st.warning("⚠️ ตรวจพบข้อมูลเก่า: กรุณา Logout แล้ว Login ใหม่เพื่อโหลดชื่อพนักงาน")
-    
+         st.warning("⚠️ ข้อมูลชื่อยังไม่โหลด กรุณา Logout แล้ว Login ใหม่")
+
     # --- SIDEBAR ---
     with st.sidebar:
         st.subheader("ข้อมูลพนักงาน")
@@ -292,7 +309,7 @@ else:
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
 
     with tab1:
-        # === 🚛 Vehicle Input (Moved to Main) ===
+        # === 🚛 Vehicle Input ===
         st.markdown('<div class="license-plate-box">', unsafe_allow_html=True)
         col_lp1, col_lp2 = st.columns([1, 3])
         with col_lp1:
@@ -302,7 +319,6 @@ else:
                           placeholder="เช่น 1กข-1234 (กรอกครั้งเดียวใช้จนกว่าจะกดบันทึก)",
                           help="ทะเบียนรถจะถูกล้างค่าหลังจากกดบันทึกงาน")
         st.markdown('</div>', unsafe_allow_html=True)
-        # ========================================
 
         if st.session_state.scan_error:
             st.markdown(f'<div class="error-box">{st.session_state.scan_error}</div>', unsafe_allow_html=True)
