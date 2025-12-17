@@ -31,6 +31,14 @@ h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
     text-align: center;
     font-size: 1.2rem;
 }
+/* เพิ่ม Style ให้กล่องทะเบียนรถเด่นชัด */
+.vehicle-box {
+    background-color: #e8f5e9;
+    padding: 15px;
+    border-radius: 10px;
+    border: 1px solid #c8e6c9;
+    margin-bottom: 20px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -108,6 +116,9 @@ if 'staged_data' not in st.session_state: st.session_state.staged_data = []
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
 if 'scan_error' not in st.session_state: st.session_state.scan_error = None 
 if 'play_sound' not in st.session_state: st.session_state.play_sound = None 
+
+# [สำคัญ] ตัวแปรสำหรับ Reset กล่องข้อความ (แก้ Error 100%)
+if 'reset_key' not in st.session_state: st.session_state.reset_key = 0
 
 # --- SOUND SYSTEM ---
 def play_audio_feedback():
@@ -188,6 +199,14 @@ def on_scan_mode_b():
         st.session_state.mkp_tracking_b = ""
         st.session_state.mkp_barcode_b = ""
 
+# ฟังก์ชัน Logout (ย้าย Logic มาไว้ที่นี่เพื่อความปลอดภัย)
+def logout_func():
+    st.session_state.user_id = ""
+    st.session_state.staged_data = []
+    # เปลี่ยน Key เพื่อ Reset ค่า Input (แก้ Error 100%)
+    st.session_state.reset_key += 1
+    # st.session_state.license_plate จะถูกล้างเองจากการเปลี่ยน Key
+
 def confirm_save_all():
     if not st.session_state.staged_data:
         st.warning("ไม่มีรายการให้บันทึก")
@@ -203,8 +222,10 @@ def confirm_save_all():
             # --- CLEAR DATA SECTION ---
             st.session_state.staged_data = []      # ล้างรายการที่พักไว้
             st.session_state.scan_error = None     # ล้าง Error
-            st.session_state.license_plate = ""    # 🔥 ล้างทะเบียนรถ (ต้องกรอกใหม่)
-            st.session_state.locked_barcode = ""   # 🔥 ล้างสินค้าต้นแบบ (Mode A ต้องสแกนใหม่)
+            st.session_state.locked_barcode = ""   # ล้างสินค้าต้นแบบ
+            
+            # [แก้ Error] ใช้การเปลี่ยน Key แทนการกำหนดค่าว่างโดยตรง
+            st.session_state.reset_key += 1
             
             load_data_from_sheet.clear() # ล้าง Cache
             st.balloons()
@@ -241,26 +262,30 @@ else:
     with st.sidebar:
         st.write(f"👤 **{st.session_state.user_id}**")
         st.markdown("---")
-        
-        st.subheader("🚛 ข้อมูลรถขนส่ง")
-        # ผูกตัวแปร session_state.license_plate กับ input
-        st.text_input("ทะเบียนรถ (Vehicle ID)", key="license_plate", help="ระบุทะเบียนรถเพื่องานรอบนี้")
-        
-        if st.session_state.license_plate:
-            st.success(f"รถ: {st.session_state.license_plate}")
-        else:
-            st.warning("ยังไม่ระบุทะเบียนรถ")
-            
-        st.markdown("---")
-        if st.button("Logout"): 
-            st.session_state.user_id = ""
-            st.session_state.staged_data = []
-            st.session_state.license_plate = ""
-            st.rerun()
+        # ใช้ on_click เพื่อความเสถียร
+        st.button("Logout", on_click=logout_func)
 
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
 
     with tab1:
+        # === 1. ย้ายมาไว้ข้างบน (Vehicle Input) ===
+        st.markdown('<div class="vehicle-box">', unsafe_allow_html=True)
+        col_veh1, col_veh2 = st.columns([1, 3])
+        with col_veh1:
+            st.markdown("### 🚛")
+        with col_veh2:
+            # ใช้ Dynamic Key (lp_{reset_key}) เพื่อให้ล้างค่าได้โดยไม่ Error
+            lp_val = st.text_input(
+                "ระบุทะเบียนรถ (Vehicle ID)", 
+                key=f"lp_{st.session_state.reset_key}",
+                placeholder="เช่น 1กข-9999 (กรอกครั้งเดียวใช้จนกว่าจะกดบันทึก)",
+                help="ทะเบียนรถจะถูกล้างค่าหลังจากกดบันทึกงาน"
+            )
+            # อัปเดตค่าเข้าตัวแปรหลัก
+            st.session_state.license_plate = lp_val
+        st.markdown('</div>', unsafe_allow_html=True)
+        # ========================================
+
         if st.session_state.scan_error:
             st.markdown(f'<div class="error-box">{st.session_state.scan_error}</div>', unsafe_allow_html=True)
             if st.button("ปิดแจ้งเตือน"): 
