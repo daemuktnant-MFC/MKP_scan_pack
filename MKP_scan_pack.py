@@ -67,20 +67,23 @@ def verify_user_login(user_id):
     try:
         ws = get_sheet_connection(USER_SHEET_NAME)
         if ws:
-            # ดึงข้อมูลทั้งหมดมาเช็ค (Col A=0, B=1, C=2)
+            # ดึงข้อมูลทั้งหมดมาเช็ค
             all_records = ws.get_all_values()
-            
             target_id = str(user_id).strip()
             
             for row in all_records:
-                # เช็คว่าแถวนี้มีข้อมูลครบไหม (อย่างน้อยถึง Col B)
-                if len(row) > 1:
-                    # Row[1] คือ Column B (User ID)
-                    current_id = str(row[1]).strip()
+                # ตรวจสอบว่าแถวนี้มีความยาวพอที่จะมี Col B ไหม (Index 0, 1)
+                if len(row) >= 2:
+                    current_id = str(row[1]).strip() # Col B = Index 1
                     
                     if current_id == target_id:
-                        # Row[2] คือ Column C (User Name) - ถ้าไม่มีให้ว่างไว้
-                        user_name = row[2].strip() if len(row) > 2 else "Unknown"
+                        # เจอ ID แล้ว! ต่อไปหาชื่อใน Col C (Index 2)
+                        if len(row) >= 3:
+                            user_name = str(row[2]).strip()
+                            if not user_name: user_name = "ไม่ระบุชื่อ"
+                        else:
+                            user_name = "Unknown Name" # กรณีไม่มี Col C
+                            
                         return True, user_name
             
             return False, None
@@ -99,11 +102,10 @@ def save_batch_to_sheet(data_list):
             tz = pytz.timezone('Asia/Bangkok')
             ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
             for item in data_list:
-                # Format ใหม่: เพิ่ม user_name ต่อจาก user_id
                 row = [
                     ts, 
                     item['user_id'], 
-                    item['user_name'], # <--- เพิ่มตรงนี้ (Column C ใน Sheet Data_Pack)
+                    item['user_name'], 
                     item['tracking'], 
                     item['barcode'], 
                     "Normal", 
@@ -134,7 +136,7 @@ def load_data_from_sheet():
 
 # --- SESSION STATE ---
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
-if 'user_name' not in st.session_state: st.session_state.user_name = "" # เก็บชื่อพนักงาน
+if 'user_name' not in st.session_state: st.session_state.user_name = "" 
 if 'license_plate' not in st.session_state: st.session_state.license_plate = "" 
 if 'staged_data' not in st.session_state: st.session_state.staged_data = [] 
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
@@ -183,14 +185,13 @@ def add_to_staging(tracking, barcode, mode):
         st.toast(msg, icon="🚫") 
         return 
     
-    # แจ้งเตือนถ้าลืมใส่ทะเบียนรถ (แต่ไม่บล็อก)
     if not st.session_state.license_plate:
         st.toast("⚠️ ยังไม่ระบุทะเบียนรถ!", icon="🚛")
 
     new_item = {
         "id": str(uuid.uuid4()), 
         "user_id": st.session_state.user_id,
-        "user_name": st.session_state.user_name, # แนบชื่อไปด้วย
+        "user_name": st.session_state.user_name, 
         "license_plate": st.session_state.license_plate, 
         "tracking": tracking,
         "barcode": barcode,
@@ -258,18 +259,22 @@ if not st.session_state.user_id:
                 found, name = verify_user_login(u_input)
                 if found:
                     st.session_state.user_id = u_input
-                    st.session_state.user_name = name # เก็บชื่อพนักงาน
+                    st.session_state.user_name = name 
                     st.toast(f"สวัสดีคุณ {name}", icon="✅")
                     time.sleep(0.5)
                     st.rerun()
                 else:
                     st.error(f"❌ ไม่พบรหัส: '{u_input}' ในระบบ")
-                    st.warning("ตรวจสอบ Sheet: User_MKP คอลัมน์ B")
+                    st.warning("ตรวจสอบ Sheet: User_MKP คอลัมน์ B และชื่อใน คอลัมน์ C")
         else:
             st.warning("กรุณากรอกรหัสพนักงาน")
 
 else:
-    # --- SIDEBAR (Updated) ---
+    # --- Check if Name is missing (Legacy Session Fix) ---
+    if not st.session_state.user_name:
+        st.warning("⚠️ ตรวจพบข้อมูลเก่า: กรุณา Logout แล้ว Login ใหม่เพื่อโหลดชื่อพนักงาน")
+    
+    # --- SIDEBAR ---
     with st.sidebar:
         st.subheader("ข้อมูลพนักงาน")
         st.info(f"👤 **{st.session_state.user_name}**")
@@ -351,7 +356,6 @@ else:
 
         if count_waiting > 0:
             with st.container(border=True):
-                # เพิ่ม column แสดงชื่อคนยิงด้วยก็ได้ถ้าต้องการ แต่ตอนนี้เอาแค่นี้ก่อน
                 h1, h2, h3, h4, h5 = st.columns([1, 2, 3, 3, 1])
                 h1.markdown("**เวลา**")
                 h2.markdown("**ทะเบียนรถ**")
