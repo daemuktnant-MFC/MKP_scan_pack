@@ -31,14 +31,6 @@ h1 { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
     text-align: center;
     font-size: 1.2rem;
 }
-/* ไฮไลท์ทะเบียนรถ */
-.license-plate-box {
-    padding: 10px;
-    background-color: #e3f2fd;
-    border-left: 5px solid #2196f3;
-    border-radius: 5px;
-    margin-bottom: 15px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -59,49 +51,25 @@ def get_sheet_connection(sheet_name):
         except: return None
     return None
 
-def verify_user_login(user_id):
-    """
-    ตรวจสอบ User ID (Col B) และดึง User Name (โดยหาจาก Header 'Name' หรือ Col C)
-    Return: (bool_found, str_user_name)
-    """
+def check_user_exists(user_id):
+    """ตรวจสอบว่า User ID มีอยู่ใน Sheet 'User_MKP' (Column B) หรือไม่"""
     try:
         ws = get_sheet_connection(USER_SHEET_NAME)
         if ws:
-            all_records = ws.get_all_values()
+            # เช็ค Column B (คอลัมน์ที่ 2)
+            existing_users = ws.col_values(2) 
+            clean_users = [str(u).strip() for u in existing_users]
             
-            if not all_records:
-                st.error("❌ ไม่พบข้อมูลใน Sheet User_MKP")
-                return False, None
-
-            headers = all_records[0] 
-            target_id = str(user_id).strip()
-
-            # หา Index ของคอลัมน์ "Name" หรือ "ชื่อ"
-            name_col_idx = -1
-            for i, h in enumerate(headers):
-                h_str = str(h).lower()
-                if "name" in h_str or "ชื่อ" in h_str:
-                    name_col_idx = i
-                    break
-            
-            # ถ้าหาไม่เจอ ให้ใช้ Index 2 (Column C)
-            if name_col_idx == -1: name_col_idx = 2 
-
-            # วนลูปหา User ID ใน Column B (Index 1)
-            for row in all_records:
-                while len(row) <= max(1, name_col_idx): row.append("")
-                current_id = str(row[1]).strip()
-                if current_id == target_id:
-                    user_name = str(row[name_col_idx]).strip()
-                    if not user_name: user_name = "ไม่ระบุชื่อ"
-                    return True, user_name
-            return False, None
+            if str(user_id).strip() in clean_users:
+                return True
+            else:
+                return False
         else:
-            st.error(f"❌ ไม่พบ Tab ชื่อ '{USER_SHEET_NAME}'")
-            return False, None
+            st.error(f"❌ ไม่พบ Tab ชื่อ '{USER_SHEET_NAME}' ใน Google Sheet")
+            return False
     except Exception as e:
         st.error(f"Error checking user: {e}")
-        return False, None
+        return False
 
 def save_batch_to_sheet(data_list):
     try:
@@ -111,17 +79,7 @@ def save_batch_to_sheet(data_list):
             tz = pytz.timezone('Asia/Bangkok')
             ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
             for item in data_list:
-                row = [
-                    ts, 
-                    item['user_id'], 
-                    item['user_name'], 
-                    item['tracking'], 
-                    item['barcode'], 
-                    "Normal", 
-                    1, 
-                    item['mode'], 
-                    item['license_plate']
-                ]
+                row = [ts, item['user_id'], item['tracking'], item['barcode'], "Normal", 1, item['mode'], item['license_plate']]
                 rows_to_add.append(row)
             ws.append_rows(rows_to_add)
             return True
@@ -145,21 +103,20 @@ def load_data_from_sheet():
 
 # --- SESSION STATE ---
 if 'user_id' not in st.session_state: st.session_state.user_id = ""
-if 'user_name' not in st.session_state: st.session_state.user_name = "" 
+if 'license_plate' not in st.session_state: st.session_state.license_plate = "" 
 if 'staged_data' not in st.session_state: st.session_state.staged_data = [] 
 if 'locked_barcode' not in st.session_state: st.session_state.locked_barcode = ""
 if 'scan_error' not in st.session_state: st.session_state.scan_error = None 
 if 'play_sound' not in st.session_state: st.session_state.play_sound = None 
 
-# [NEW] ตัวแปรสำหรับ Reset Input (วิธีแก้ Error 100%)
-if 'form_reset_key' not in st.session_state: st.session_state.form_reset_key = 0
-
 # --- SOUND SYSTEM ---
 def play_audio_feedback():
     if st.session_state.play_sound == 'success':
-        st.audio("https://www.soundjay.com/buttons/sounds/button-16.mp3", format="audio/mp3", autoplay=True)
+        sound_url = "https://www.soundjay.com/buttons/sounds/button-16.mp3"
+        st.audio(sound_url, format="audio/mp3", autoplay=True)
     elif st.session_state.play_sound == 'error':
-        st.audio("https://www.soundjay.com/buttons/sounds/button-10.mp3", format="audio/mp3", autoplay=True)
+        sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
+        st.audio(sound_url, format="audio/mp3", autoplay=True)
     st.session_state.play_sound = None
 
 # --- DUPLICATE CHECK FUNCTION ---
@@ -188,10 +145,6 @@ def add_to_staging(tracking, barcode, mode):
     tracking = tracking.strip()
     barcode = barcode.strip()
 
-    # ดึงค่าทะเบียนรถจาก Key ปัจจุบัน
-    current_lp_key = f"license_{st.session_state.form_reset_key}"
-    current_lp = st.session_state.get(current_lp_key, "")
-
     is_dup, msg = check_duplicate(tracking)
     
     if is_dup:
@@ -200,14 +153,13 @@ def add_to_staging(tracking, barcode, mode):
         st.toast(msg, icon="🚫") 
         return 
     
-    if not current_lp:
-        st.toast("⚠️ ยังไม่ระบุทะเบียนรถ!", icon="🚛")
+    if not st.session_state.license_plate:
+        st.toast("⚠️ อย่าลืมระบุทะเบียนรถ!", icon="🚛")
 
     new_item = {
         "id": str(uuid.uuid4()), 
         "user_id": st.session_state.user_id,
-        "user_name": st.session_state.user_name, 
-        "license_plate": current_lp,  # ใช้ค่าที่ดึงมา
+        "license_plate": st.session_state.license_plate, 
         "tracking": tracking,
         "barcode": barcode,
         "mode": mode,
@@ -222,24 +174,19 @@ def delete_from_staging(item_id):
     st.toast("ลบรายการแล้ว", icon="🗑️")
 
 def on_scan_mode_a():
-    # ดึง Key ปัจจุบัน
-    tracking_key = f"mkp_tracking_a_{st.session_state.form_reset_key}"
-    tracking = st.session_state.get(tracking_key, "").strip()
+    tracking = st.session_state.mkp_tracking_a.strip()
     barcode = st.session_state.get('locked_barcode', '').strip()
-    
     if tracking and barcode:
         add_to_staging(tracking, barcode, "Mode A")
-        # ไม่ต้อง Clear tracking ที่นี่ เพราะเราใช้ dynamic key ในการเคลียร์ทีหลัง 
-        # (หรือถ้าจะเคลียร์เฉพาะช่องนี้ ก็ทำได้ แต่ Code เดิมใช้วิธีเปลี่ยน key จะง่ายกว่าตอน Reset ใหญ่)
-        # แต่เพื่อ UX ที่ดีใน Mode A (ยิงรัว) เราอาจจะอยากเคลียร์แค่ช่อง Tracking
-        # งั้นใช้เทคนิคพิเศษ: Clear เฉพาะช่องนี้
-        # st.session_state[tracking_key] = "" # วิธีนี้เสี่ยง Error
-        # ดังนั้นใน Mode A เรายอมให้ Error หายโดยใช้ form_reset_key ไม่ได้ถ้าเรายิงรัว
-        # *แก้ปัญหา:* ใช้ Widget Callback Clear
-        pass 
+        st.session_state.mkp_tracking_a = "" 
 
-# เนื่องจาก Mode A ต้องยิงรัว เราจะใช้วิธี Clear Manual สำหรับ Mode A
-# ส่วน License Plate จะ Clear เมื่อกด Save All เท่านั้น
+def on_scan_mode_b():
+    tracking = st.session_state.mkp_tracking_b.strip()
+    barcode = st.session_state.mkp_barcode_b.strip()
+    if tracking and barcode:
+        add_to_staging(tracking, barcode, "Mode B")
+        st.session_state.mkp_tracking_b = ""
+        st.session_state.mkp_barcode_b = ""
 
 def confirm_save_all():
     if not st.session_state.staged_data:
@@ -252,28 +199,19 @@ def confirm_save_all():
         
         if success:
             st.success("✅ บันทึกข้อมูลลง Google Sheet เรียบร้อย!")
-            st.session_state.staged_data = [] 
-            st.session_state.scan_error = None 
-            st.session_state.locked_barcode = "" 
             
-            # [KEY FIX] เปลี่ยน Key เพื่อล้างค่า Input ทะเบียนรถและอื่นๆ ทันที
-            st.session_state.form_reset_key += 1 
+            # --- CLEAR DATA SECTION ---
+            st.session_state.staged_data = []      # ล้างรายการที่พักไว้
+            st.session_state.scan_error = None     # ล้าง Error
+            st.session_state.license_plate = ""    # 🔥 ล้างทะเบียนรถ (ต้องกรอกใหม่)
+            st.session_state.locked_barcode = ""   # 🔥 ล้างสินค้าต้นแบบ (Mode A ต้องสแกนใหม่)
             
-            load_data_from_sheet.clear()
+            load_data_from_sheet.clear() # ล้าง Cache
             st.balloons()
             time.sleep(1)
             st.rerun()
         else:
             st.error("❌ บันทึกไม่สำเร็จ กรุณาลองใหม่")
-
-def logout_user():
-    st.session_state.user_id = ""
-    st.session_state.user_name = ""
-    st.session_state.staged_data = []
-    st.session_state.locked_barcode = ""
-    st.session_state.scan_error = None
-    st.session_state.form_reset_key = 0 # Reset key
-    load_data_from_sheet.clear()
 
 # --- MAIN APP ---
 st.title("📦 MKP Scan & Pack (Pro)")
@@ -287,48 +225,42 @@ if not st.session_state.user_id:
     if st.button("Start / Login"):
         if u_input:
             with st.spinner("🔍 กำลังตรวจสอบสิทธิ์..."):
-                found, name = verify_user_login(u_input)
-                if found:
+                if check_user_exists(u_input):
                     st.session_state.user_id = u_input
-                    st.session_state.user_name = name 
-                    st.toast(f"สวัสดีคุณ {name}", icon="✅")
+                    st.toast(f"ยินดีต้อนรับ {u_input}", icon="✅")
                     time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error(f"❌ ไม่พบรหัส: '{u_input}' ในระบบ")
-                    st.warning("ตรวจสอบ Sheet: User_MKP")
+                    st.error(f"❌ ไม่พบรหัสพนักงาน: '{u_input}' ในระบบ")
+                    st.warning("ตรวจสอบ Sheet: User_MKP คอลัมน์ B")
         else:
             st.warning("กรุณากรอกรหัสพนักงาน")
 
 else:
-    if not st.session_state.user_name:
-         st.warning("⚠️ ข้อมูลชื่อยังไม่โหลด กรุณา Logout แล้ว Login ใหม่")
-
-    # --- SIDEBAR ---
+    # --- LOGGED IN CONTENT ---
     with st.sidebar:
-        st.subheader("ข้อมูลพนักงาน")
-        st.info(f"👤 **{st.session_state.user_name}**")
-        st.caption(f"ID: {st.session_state.user_id}")
+        st.write(f"👤 **{st.session_state.user_id}**")
         st.markdown("---")
-        st.button("Logout", use_container_width=True, on_click=logout_user)
+        
+        st.subheader("🚛 ข้อมูลรถขนส่ง")
+        # ผูกตัวแปร session_state.license_plate กับ input
+        st.text_input("ทะเบียนรถ (Vehicle ID)", key="license_plate", help="ระบุทะเบียนรถเพื่องานรอบนี้")
+        
+        if st.session_state.license_plate:
+            st.success(f"รถ: {st.session_state.license_plate}")
+        else:
+            st.warning("ยังไม่ระบุทะเบียนรถ")
+            
+        st.markdown("---")
+        if st.button("Logout"): 
+            st.session_state.user_id = ""
+            st.session_state.staged_data = []
+            st.session_state.license_plate = ""
+            st.rerun()
 
-    # --- MAIN CONTENT ---
     tab1, tab2 = st.tabs(["📷 Scan Work", "📊 Dashboard"])
 
     with tab1:
-        # === 🚛 Vehicle Input (Dynamic Key) ===
-        st.markdown('<div class="license-plate-box">', unsafe_allow_html=True)
-        col_lp1, col_lp2 = st.columns([1, 3])
-        with col_lp1:
-            st.markdown("### 🚛")
-        with col_lp2:
-            # ใช้ Key ที่เปลี่ยนไปเรื่อยๆ เพื่อ Reset ค่า
-            lp_key = f"license_{st.session_state.form_reset_key}"
-            st.text_input("ระบุทะเบียนรถ (Vehicle ID)", key=lp_key, 
-                          placeholder="เช่น 1กข-1234 (กรอกครั้งเดียวใช้จนกว่าจะกดบันทึก)",
-                          help="ทะเบียนรถจะถูกล้างค่าหลังจากกดบันทึกงาน")
-        st.markdown('</div>', unsafe_allow_html=True)
-
         if st.session_state.scan_error:
             st.markdown(f'<div class="error-box">{st.session_state.scan_error}</div>', unsafe_allow_html=True)
             if st.button("ปิดแจ้งเตือน"): 
@@ -348,17 +280,9 @@ else:
             
             c1, c2 = st.columns([3, 1])
             with c1:
-                # Master Barcode ใช้ key แยก เพราะอาจจะไม่ต้อง reset บ่อย หรือ reset พร้อมกันก็ได้
-                # ถ้าอยากให้ reset พร้อมกัน ใช้ form_reset_key ได้
-                bc_key = f"master_bc_{st.session_state.form_reset_key}"
                 if not st.session_state.locked_barcode:
-                    # ถ้ายังไม่มีค่า ให้แสดง Input
-                    def on_master_bc_change():
-                         # Callback เพื่อเก็บค่า
-                         val = st.session_state[bc_key]
-                         if val: st.session_state.locked_barcode = val
-                    
-                    st.text_input("1. สแกนสินค้าต้นแบบ", key=bc_key, on_change=on_master_bc_change)
+                    bc = st.text_input("1. สแกนสินค้าต้นแบบ", key="master_bc_input")
+                    if bc: st.session_state.locked_barcode = bc; st.rerun()
                 else:
                     st.success(f"🔒 สินค้า: **{st.session_state.locked_barcode}**")
             with c2:
@@ -366,65 +290,15 @@ else:
                     if st.button("เปลี่ยนสินค้า"): st.session_state.locked_barcode = ""; st.rerun()
 
             if st.session_state.locked_barcode:
-                # Tracking input ต้อง Clear ตัวเองเมื่อยิงเสร็จ (Auto-clear)
-                # เราใช้ st.session_state[key] = "" ได้ เพราะเราจะทำให้มัน rerun ทันที
-                # แต่เพื่อความปลอดภัย ใช้ Logic Key แยกสำหรับ Tracking ที่ต้องยิงรัวๆ
-                
-                # Logic เฉพาะสำหรับ Mode A (ยิงรัว)
-                if 'mode_a_counter' not in st.session_state: st.session_state.mode_a_counter = 0
-                
-                def on_track_a_submit():
-                    # Callback
-                    key = f"track_a_{st.session_state.mode_a_counter}"
-                    val = st.session_state[key]
-                    if val:
-                        add_to_staging(val, st.session_state.locked_barcode, "Mode A")
-                        st.session_state.mode_a_counter += 1 # เปลี่ยน Key เพื่อ Clear ช่อง
-                
-                track_key = f"track_a_{st.session_state.mode_a_counter}"
-                st.text_input("2. ยิง Tracking ID (เพิ่มลงรายการ)", key=track_key, on_change=on_track_a_submit)
-                st.button("เพิ่มรายการ (Manual)", on_click=on_track_a_submit)
+                st.text_input("2. ยิง Tracking ID (เพิ่มลงรายการ)", key="mkp_tracking_a", on_change=on_scan_mode_a)
+                st.button("เพิ่มรายการ (Manual)", on_click=on_scan_mode_a)
 
         else:
             st.info("💡 Mode B: สแกนคู่ (Tracking + Barcode)")
-            # Mode B ใช้ Logic คล้าย Mode A คือ Clear หลังยิงเสร็จ
-            if 'mode_b_counter' not in st.session_state: st.session_state.mode_b_counter = 0
-            
             c1, c2 = st.columns(2)
-            
-            # เราต้องเก็บค่า Tracking ไว้ชั่วคราวก่อนยิง Barcode
-            if 'temp_tracking_b' not in st.session_state: st.session_state.temp_tracking_b = ""
-            
-            def on_track_b_change():
-                key = f"track_b_{st.session_state.mode_b_counter}"
-                st.session_state.temp_tracking_b = st.session_state[key]
-
-            def on_barcode_b_submit():
-                key_bc = f"bc_b_{st.session_state.mode_b_counter}"
-                bc_val = st.session_state[key_bc]
-                
-                # Tracking ต้องเอามาจาก temp หรือ input
-                # แต่ input tracking อาจจะหายไปแล้วถ้าเรา refresh? ไม่หายถ้า key เดิม
-                # ใช้ค่าจาก temp_tracking_b ที่เก็บไว้
-                track_val = st.session_state.temp_tracking_b
-                
-                if track_val and bc_val:
-                    add_to_staging(track_val, bc_val, "Mode B")
-                    st.session_state.mode_b_counter += 1 # Clear ทั้งคู่
-                    st.session_state.temp_tracking_b = "" # Reset temp
-            
-            with c1: 
-                # Tracking Input
-                track_key = f"track_b_{st.session_state.mode_b_counter}"
-                # ถ้ามีค่า temp ให้แสดง (Optional) แต่ปกติ input จะค้างอยู่
-                st.text_input("1. Tracking ID", key=track_key, on_change=on_track_b_change)
-                
-            with c2: 
-                # Barcode Input
-                bc_key = f"bc_b_{st.session_state.mode_b_counter}"
-                st.text_input("2. Product Barcode", key=bc_key, on_change=on_barcode_b_submit)
-
-            st.button("เพิ่มรายการ", on_click=on_barcode_b_submit)
+            with c1: st.text_input("1. Tracking ID", key="mkp_tracking_b")
+            with c2: st.text_input("2. Product Barcode", key="mkp_barcode_b", on_change=on_scan_mode_b)
+            st.button("เพิ่มรายการ", on_click=on_scan_mode_b)
 
         # === STAGING TABLE AREA ===
         st.markdown("---")
