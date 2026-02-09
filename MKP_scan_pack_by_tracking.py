@@ -251,7 +251,7 @@ def check_and_execute_reset():
         if 'rider_ord_man' in st.session_state: st.session_state.rider_ord_man = ""
         if 'pack_prod_man' in st.session_state: st.session_state.pack_prod_man = ""
         if 'loc_man' in st.session_state: st.session_state.loc_man = ""
-        if 'rider_lp_input' in st.session_state: st.session_state.rider_lp_input = "" # Reset ทะเบียนรถด้วย
+        if 'rider_lp_input' in st.session_state: st.session_state.rider_lp_input = "" 
         
         # Reset State Variables
         st.session_state.order_val = ""
@@ -287,7 +287,7 @@ def init_session_state():
     if 'need_reset' not in st.session_state: st.session_state.need_reset = False
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
-            'target_rider_folder_id', 'target_rider_folder_name', 'rider_lp_val'] # Added rider_lp_val
+            'target_rider_folder_id', 'target_rider_folder_name', 'rider_lp_val']
     for k in keys:
         if k not in st.session_state:
             if k == 'pick_qty': st.session_state[k] = 1
@@ -383,46 +383,48 @@ else:
                         res_p = decode(Image.open(scan_prod))
                         if res_p: st.session_state.prod_val = res_p[0].data.decode("utf-8"); st.rerun()
                 else:
-                    target_loc_str = None; prod_found = False
+                    # ===================
+                    # ⚡ AUTO ADD LOGIC ⚡
+                    # ===================
+                    target_loc_str = "Unknown"
+                    prod_found = False
+                    
                     if not df_items.empty:
                         match = df_items[df_items['Barcode'] == st.session_state.prod_val]
                         if not match.empty:
-                            prod_found = True; row = match.iloc[0]
+                            prod_found = True
+                            row = match.iloc[0]
                             try: brand = str(row.iloc[3]); variant = str(row.iloc[5]); full_name = f"{brand} {variant}"
                             except: full_name = "Error Name"
+                            
                             st.session_state.prod_display_name = full_name
+                            # ดึง Location จาก Excel เพื่อบันทึกเลย (ไม่ต้องสแกนซ้ำ)
                             target_loc_str = f"{str(row.get('Zone','')).strip()}-{str(row.get('Location','')).strip()}"
-                            st.success(f"✅ **{full_name}**"); st.warning(f"📍 เป้าหมาย: **{target_loc_str}**")
-                        else: st.error("❌ ไม่พบ Barcode")
-                    else: st.warning("⚠️ Loading Data...")
-                    
-                    if st.button("❌ สแกนใหม่"): 
-                        st.session_state.prod_val = ""; st.session_state.cam_counter += 1; st.rerun()
-
-                    if prod_found and target_loc_str:
-                        st.markdown("---"); st.markdown("##### ยืนยัน Location")
-                        if not st.session_state.loc_val:
-                            man_loc = st.text_input("Scan/พิมพ์ Location", key="loc_man").strip().upper()
-                            if man_loc: st.session_state.loc_val = man_loc; st.rerun()
-                            scan_loc = back_camera_input("แตะเพื่อสแกน Location", key=f"loc_cam_{st.session_state.cam_counter}")
-                            if scan_loc:
-                                res_l = decode(Image.open(scan_loc))
-                                if res_l: st.session_state.loc_val = res_l[0].data.decode("utf-8").upper(); st.rerun()
                         else:
-                            if st.session_state.loc_val == target_loc_str or st.session_state.loc_val in target_loc_str:
-                                st.success(f"✅ ถูกต้อง: {st.session_state.loc_val}")
-                                st.markdown("##### ระบุจำนวน")
-                                st.session_state.pick_qty = st.number_input("จำนวน (Qty)", min_value=1, value=1)
-                                st.markdown("---")
-                                if st.button("➕ เพิ่มลงตะกร้า", type="primary", use_container_width=True):
-                                    new_item = {"Barcode": st.session_state.prod_val, "Product Name": st.session_state.prod_display_name, "Location": st.session_state.loc_val, "Qty": st.session_state.pick_qty}
-                                    st.session_state.current_order_items.append(new_item)
-                                    st.toast(f"เพิ่ม {st.session_state.prod_display_name} แล้ว!", icon="🛒")
-                                    st.session_state.prod_val = ""; st.session_state.loc_val = ""; st.session_state.pick_qty = 1; st.session_state.cam_counter += 1
-                                    st.rerun()
-                            else:
-                                st.error(f"❌ ผิดตำแหน่ง ({st.session_state.loc_val})")
-                                if st.button("แก้ Location"): st.session_state.loc_val = ""; st.rerun()
+                            st.error(f"❌ ไม่พบ Barcode: {st.session_state.prod_val}")
+                    else:
+                        st.warning("⚠️ Loading Data...")
+                    
+                    # ถ้าเจอสินค้า -> บันทึกลงตะกร้าทันที!
+                    if prod_found:
+                        new_item = {
+                            "Barcode": st.session_state.prod_val,
+                            "Product Name": st.session_state.prod_display_name,
+                            "Location": target_loc_str, # ใช้ Location จาก Master Data
+                            "Qty": 1 # Fix จำนวนเป็น 1
+                        }
+                        st.session_state.current_order_items.append(new_item)
+                        st.toast(f"✅ เพิ่ม {full_name} แล้ว!", icon="🛒")
+                        
+                        # Reset เพื่อสแกนชิ้นต่อไป
+                        st.session_state.prod_val = ""
+                        st.session_state.cam_counter += 1
+                        st.rerun()
+                    
+                    # ถ้าไม่เจอ หรือมี Error ให้แสดงปุ่ม Reset
+                    if not prod_found:
+                         if st.button("❌ สแกนใหม่"): 
+                            st.session_state.prod_val = ""; st.session_state.cam_counter += 1; st.rerun()
 
                 if st.session_state.current_order_items:
                     st.markdown("---")
