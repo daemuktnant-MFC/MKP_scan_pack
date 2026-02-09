@@ -280,7 +280,7 @@ check_and_execute_reset()
 
 # --- LOGIN ---
 if not st.session_state.current_user_name:
-    st.title("🔐 Login พนักงาน")
+    st.title("🔐 Login User")
     df_users = load_sheet_data(USER_SHEET_NAME)
 
     if st.session_state.temp_login_user is None:
@@ -472,8 +472,15 @@ else:
                                         final_image_link_id
                                     )
                                     
-                                st.balloons()
-                                st.success("✅ บันทึกเสร็จสิ้น!")
+                                st.markdown(
+                                    """
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 100px;">✅</div>
+                                        <h2 style="color: #28a745; margin-top: -20px;">บันทึกสำเร็จ!</h2>
+                                    </div>
+                                    """, 
+                                    unsafe_allow_html=True
+                                )
                                 time.sleep(1.5)
                                 trigger_reset()
                                 st.rerun()
