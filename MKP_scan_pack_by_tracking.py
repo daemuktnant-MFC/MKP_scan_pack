@@ -5,66 +5,54 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from datetime import datetime, timedelta
-import time
-import pytz
-import uuid
 from PIL import Image
-import io
+from pyzbar.pyzbar import decode 
+import io 
+import time
 from googleapiclient.errors import HttpError
 import json
+
+# --- DEBUG CONNECTION ---
+# st.write("Testing Connection...")
+# try:
+#     creds = get_credentials()
+#     gc = gspread.authorize(creds)
+#     sh = gc.open_by_key(SHEET_ID)
+#     ws = sh.worksheet(USER_SHEET_NAME)
+#     st.success(f"✅ เชื่อมต่อ Google Sheet สำเร็จ! เจอข้อมูล {len(ws.get_all_values())} แถว")
+# except Exception as e:
+#     st.error(f"❌ เชื่อมต่อไม่ได้: {e}")
+#     st.stop()
 
 # --- IMPORT LIBRARY กล้อง ---
 try:
     from streamlit_back_camera_input import back_camera_input
-    from pyzbar.pyzbar import decode
 except ImportError:
-    st.error("⚠️ กรุณาติดตั้ง library: streamlit-back-camera-input, pyzbar, Pillow")
+    st.error("⚠️ ต้องเพิ่ม 'streamlit-back-camera-input' ใน requirements.txt")
     st.stop()
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="New App: Scan & Pack", page_icon="✨", layout="wide")
+# --- CSS HACK ---
+st.markdown(
+    """
+    <style>
+    iframe[title="streamlit_back_camera_input.back_camera_input"] {
+        min-height: 450px !important; 
+        height: 150% !important;
+    }
+    div[data-testid="stDataFrame"] { width: 100%; }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-# --- CSS STYLING ---
-st.markdown("""
-<style>
-div.block-container { padding-top: 1rem; padding-bottom: 2rem; }
-.user-header {
-    background-color: #e3f2fd; padding: 15px; border-radius: 10px;
-    margin-bottom: 15px; border: 1px solid #bbdefb; color: #0d47a1;
-}
-.vehicle-box {
-    background-color: #fff3e0; padding: 10px; border-radius: 8px;
-    border: 1px solid #ffe0b2; margin-bottom: 10px;
-}
-iframe[title="streamlit_back_camera_input.back_camera_input"] {
-    min-height: 300px !important; height: 100% !important;
-}
-.status-step {
-    font-size: 1.2rem; font-weight: bold; padding: 10px;
-    border-radius: 5px; margin: 5px 0;
-}
-.step-pending { background-color: #f5f5f5; color: #9e9e9e; border: 1px dashed #bdbdbd; }
-.step-done { background-color: #c8e6c9; color: #2e7d32; border: 1px solid #81c784; }
-.step-active { background-color: #bbdefb; color: #0d47a1; border: 2px solid #1976d2; }
-.final-cam-box {
-    border: 3px solid #ff9800; padding: 20px; border-radius: 15px;
-    text-align: center; background-color: #fff3e0; margin-top: 20px;
-}
-</style>
-""", unsafe_allow_html=True)
+# --- CONFIGURATION ---
+MAIN_FOLDER_ID = '1sZQKOuw4YGazuy4euk4ns7nLr7Zie6cm'
+SHEET_ID = '1tZfX9I6Ntbo-Jf2_rcqBc2QYUrCCCSAx8K4YBkly92c'
+LOG_SHEET_NAME = 'Logs'
+RIDER_SHEET_NAME = 'Rider_Logs'
+USER_SHEET_NAME = 'User'
 
-# ==========================================
-# 👇 แก้ไข Configuration ตรงนี้ (สำหรับ App ใหม่)
-# ==========================================
-NEW_MAIN_FOLDER_ID = '1sZQKOuw4YGazuy4euk4ns7nLr7Zie6cm' 
-NEW_SHEET_ID = '1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08'
-
-# ชื่อแผ่นงานในไฟล์ Google Sheet ใหม่ (ต้องสร้างรอไว้)
-DATA_SHEET_NAME = 'Data_Pack'    
-USER_SHEET_NAME = 'User_MKP'         
-# ==========================================
-
-# --- AUTHENTICATION (OAUTH - ใช้ User เดิม) ---
+# --- AUTHENTICATION ---
 def get_credentials():
     try:
         if "oauth" in st.secrets:
@@ -88,22 +76,6 @@ def get_credentials():
         st.error(f"❌ Error Credentials: {e}")
         return None
 
-def get_sheet_connection(sheet_name):
-    creds = get_credentials()
-    if creds:
-        gc = gspread.authorize(creds)
-        try: 
-            sh = gc.open_by_key(NEW_SHEET_ID) # เชื่อมต่อ Sheet ใหม่
-            try:
-                return sh.worksheet(sheet_name)
-            except:
-                # ถ้าหาแผ่นงานไม่เจอ ให้สร้างใหม่
-                return sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
-        except Exception as e: 
-            st.error(f"Google Sheet Error (ตรวจสอบ ID ใหม่): {e}")
-            return None
-    return None
-
 def authenticate_drive():
     try:
         creds = get_credentials()
@@ -113,40 +85,140 @@ def authenticate_drive():
         st.error(f"Error Drive: {e}")
         return None
 
-# --- FOLDER STRUCTURE LOGIC (เก็บใน Folder ใหม่) ---
-def get_target_folder_structure(service, grouping_name, main_parent_id):
-    """
-    สร้าง Folder: ปี > เดือน > วันที่ > grouping_name (เช่น ทะเบียนรถ)
-    """
+# --- GOOGLE SERVICES ---
+@st.cache_data(ttl=600)
+def load_sheet_data(sheet_name=0): 
+    try:
+        creds = get_credentials()
+        if not creds: return pd.DataFrame()
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(SHEET_ID)
+        if isinstance(sheet_name, int): worksheet = sh.get_worksheet(sheet_name)
+        else: worksheet = sh.worksheet(sheet_name)
+        rows = worksheet.get_all_values()
+        if len(rows) > 1:
+            headers = rows[0]; data = rows[1:]
+            df = pd.DataFrame(data, columns=headers)
+            df.columns = df.columns.str.strip()
+            for col in df.columns:
+                if 'barcode' in col.lower() or 'id' in col.lower(): 
+                    df[col] = df[col].astype(str).str.replace(r'\.0$', '', regex=True)
+            if 'Barcode' not in df.columns:
+                for col in df.columns:
+                    if col.lower() == 'barcode':
+                        df.rename(columns={col: 'Barcode'}, inplace=True); break
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        return pd.DataFrame()
+
+# --- TIME HELPER ---
+def get_thai_time(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+def get_thai_date_str(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%d-%m-%Y")
+def get_thai_time_suffix(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%H-%M")
+def get_thai_ts_filename(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%Y%m%d_%H%M%S")
+
+def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, file_id):
+    try:
+        creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
+        try: worksheet = sh.worksheet(LOG_SHEET_NAME)
+        except: worksheet = sh.add_worksheet(title=LOG_SHEET_NAME, rows="1000", cols="20"); worksheet.append_row(["Timestamp", "Picker Name", "Order ID", "Barcode", "Product Name", "Location", "Pick Qty", "User", "Image Link (Col I)"])
+        timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
+        worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
+    except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
+
+def save_rider_log(picker_name, order_id, file_id, folder_name):
+    try:
+        creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
+        try: worksheet = sh.worksheet(RIDER_SHEET_NAME)
+        except: worksheet = sh.add_worksheet(title=RIDER_SHEET_NAME, rows="1000", cols="10"); worksheet.append_row(["Timestamp", "User Name", "Order ID", "Folder Name", "Rider Image Link"])
+        timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
+        worksheet.append_row([timestamp, picker_name, order_id, folder_name, image_link])
+    except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
+
+# --- [MODIFIED] FOLDER STRUCTURE LOGIC ---
+def get_target_folder_structure(service, order_id, main_parent_id):
+    # คำนวณวันเวลาปัจจุบัน
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
     month_str = now.strftime("%m")
     date_str = now.strftime("%d-%m-%Y")
 
+    # Helper function: ค้นหาหรือสร้าง Folder
     def _get_or_create(parent_id, name):
         q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         res = service.files().list(q=q, fields="files(id)").execute()
         files = res.get('files', [])
         if files: return files[0]['id']
         
+        # ถ้าไม่เจอให้สร้างใหม่
         meta = {'name': name, 'parents': [parent_id], 'mimeType': 'application/vnd.google-apps.folder'}
         folder = service.files().create(body=meta, fields='id').execute()
         return folder.get('id')
 
-    # Step 1-3: Year > Month > Date
+    # Step 1: จัดการ Folder ปี (YYYY)
     year_id = _get_or_create(main_parent_id, year_str)
+    
+    # Step 2: จัดการ Folder เดือน (MM)
     month_id = _get_or_create(year_id, month_str)
+    
+    # Step 3: จัดการ Folder วันที่ (DD-MM-YYYY)
     date_id = _get_or_create(month_id, date_str)
 
-    # Step 4: Group Folder (ใช้ทะเบียนรถ หรือ ชื่อกลุ่มงาน)
+    # Step 4: สร้าง Folder Order (OrderNumber_HH-MM)
     time_suffix = now.strftime("%H-%M")
-    clean_name = str(grouping_name).replace("/", "-").strip()
-    folder_name = f"{clean_name}_{time_suffix}"
+    order_folder_name = f"{order_id}_{time_suffix}"
+    meta_order = {'name': order_folder_name, 'parents': [date_id], 'mimeType': 'application/vnd.google-apps.folder'}
+    order_folder = service.files().create(body=meta_order, fields='id').execute()
     
-    meta_group = {'name': folder_name, 'parents': [date_id], 'mimeType': 'application/vnd.google-apps.folder'}
-    target_folder = service.files().create(body=meta_group, fields='id').execute()
+    return order_folder.get('id')
+
+def find_existing_order_folder(service, order_id, main_parent_id):
+    # คำนวณวันเวลาปัจจุบันเพื่อหา Path
+    now = datetime.utcnow() + timedelta(hours=7)
+    year_str = now.strftime("%Y")
+    month_str = now.strftime("%m")
+    date_str = now.strftime("%d-%m-%Y")
+
+    # Helper function: ค้นหา Folder (คืนค่า None ถ้าไม่เจอ)
+    def _find_folder(parent_id, name):
+        q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        res = service.files().list(q=q, fields="files(id)").execute()
+        files = res.get('files', [])
+        return files[0]['id'] if files else None
+
+    # Step 1: หา Folder ปี (YYYY)
+    year_id = _find_folder(main_parent_id, year_str)
+    if not year_id: return None, "ไม่พบ Folder ปีปัจจุบัน"
+
+    # Step 2: หา Folder เดือน (MM)
+    month_id = _find_folder(year_id, month_str)
+    if not month_id: return None, "ไม่พบ Folder เดือนปัจจุบัน"
+
+    # Step 3: หา Folder วันที่ (DD-MM-YYYY)
+    date_id = _find_folder(month_id, date_str)
+    if not date_id: return None, "ไม่พบ Folder วันที่ของวันนี้ (ยังไม่มีการเปิดบิลวันนี้)"
     
-    return target_folder.get('id')
+    # Step 4: หา Folder Order ภายใต้ Folder วันที่
+    # 1. ค้นหาแบบกว้างๆ ก่อน
+    q_order = f"'{date_id}' in parents and name contains '{order_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    res_order = service.files().list(q=q_order, fields="files(id, name)", orderBy="createdTime desc").execute()
+    files_order = res_order.get('files', [])
+    
+    # 2. กรองให้ชัวร์ว่าขึ้นต้นด้วย OrderID_
+    target_prefix = f"{order_id}_" # เช่น "B01_"
+    
+    found_folder = None
+    for f in files_order:
+        if f['name'].startswith(target_prefix):
+            found_folder = f
+            break
+            
+    if found_folder:
+        return found_folder['id'], found_folder['name']
+    else:
+        return None, f"ไม่พบ Folder ของ Order: {order_id} ในวันนี้"
+# ---------------------------------------------
 
 def upload_photo(service, file_obj, filename, folder_id):
     try:
@@ -159,406 +231,332 @@ def upload_photo(service, file_obj, filename, folder_id):
             
         media = MediaIoBaseUpload(media_body, mimetype='image/jpeg', chunksize=1024*1024, resumable=True)
         
+        # --- จุดที่แก้: เพิ่มการดักจับ Error เพื่อดูรายละเอียด ---
         file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return file.get('id')
 
     except HttpError as error:
+        # แปลง Error เป็นข้อความที่อ่านออก
         error_reason = json.loads(error.content.decode('utf-8'))
-        print(f"❌ DRIVE ERROR: {error_reason}")
-        st.error(f"Google Drive Error: {error_reason}")
-        raise error
+        print(f"❌ DRIVE ERROR DETAILS: {error_reason}") # จะโชว์ใน Logs ของ Streamlit Cloud
+        st.error(f"Google Drive Error: {error_reason}") # จะโชว์หน้าจอ App
+        raise error # ส่ง Error ต่อไปให้โปรแกรมหยุดทำงาน
     except Exception as e:
         print(f"❌ GENERAL ERROR: {e}")
         raise e
 
-# --- CORE FUNCTIONS (เหมือนเดิม) ---
-def verify_user_login(user):
-    try:
-        ws = get_sheet_connection(USER_SHEET_NAME)
-        if ws:
-            all_records = ws.get_all_values()
-            if not all_records: return False, None
-            headers = all_records[0]
-            target_id = str(user).strip().lower()
-            
-            id_col_idx = -1
-            possible_id = ["id", "user", "user_id", "emp_id", "code", "รหัส"]
-            for i, h in enumerate(headers):
-                if str(h).lower().strip() in possible_id: id_col_idx = i; break
-            if id_col_idx == -1: id_col_idx = 0
+# --- SAFE RESET SYSTEM ---
+def trigger_reset():
+    st.session_state.need_reset = True
 
-            name_col_idx = -1
-            for i, h in enumerate(headers):
-                if "name" in str(h).lower() or "ชื่อ" in str(h).lower(): name_col_idx = i; break
-            if name_col_idx == -1: name_col_idx = 1 
+def check_and_execute_reset():
+    if st.session_state.get('need_reset'):
+        # Reset Widgets
+        if 'pack_order_man' in st.session_state: st.session_state.pack_order_man = ""
+        if 'rider_ord_man' in st.session_state: st.session_state.rider_ord_man = ""
+        if 'pack_prod_man' in st.session_state: st.session_state.pack_prod_man = ""
+        if 'loc_man' in st.session_state: st.session_state.loc_man = ""
+        
+        # Reset State Variables
+        st.session_state.order_val = ""
+        st.session_state.current_order_items = []
+        st.session_state.photo_gallery = [] 
+        st.session_state.rider_photo = None
+        st.session_state.picking_phase = 'scan'
+        st.session_state.temp_login_user = None
+        
+        # --- NEW: Clear Target Folder State to avoid stale data ---
+        st.session_state.target_rider_folder_id = None
+        st.session_state.target_rider_folder_name = ""
+        
+        # Reset Helpers
+        st.session_state.prod_val = ""
+        st.session_state.loc_val = ""
+        st.session_state.prod_display_name = ""
+        st.session_state.pick_qty = 1 
+        st.session_state.cam_counter += 1
+        
+        st.session_state.need_reset = False
 
-            for row in all_records[1:]:
-                while len(row) <= max(id_col_idx, name_col_idx): row.append("")
-                sheet_id = str(row[id_col_idx]).strip().lower()
-                if target_id == sheet_id or (target_id in sheet_id and len(target_id) > 2):
-                    u_name = str(row[name_col_idx]).strip()
-                    return True, u_name if u_name else "พนักงาน"
-            return False, None
-    except: return False, None
-    return False, None
+def logout_user():
+    st.session_state.current_user_name = ""
+    st.session_state.current_user_id = ""
+    trigger_reset()
+    st.rerun()
 
-def save_batch_to_sheet(data_list):
-    try:
-        ws = get_sheet_connection(DATA_SHEET_NAME)
-        if ws:
-            # ถ้า Sheet ว่าง ให้เติม Header
-            if len(ws.get_all_values()) == 0:
-                ws.append_row(["Timestamp", "User ID", "User Name", "Tracking", "Barcode", "Status", "Qty", "Mode", "License Plate", "Image Link"])
-            
-            rows = []
-            tz = pytz.timezone('Asia/Bangkok')
-            ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-            
-            for item in data_list:
-                img_link = item.get('image_link', '-')
-                rows.append([ts, item['user'], item['user_name'], item['tracking'], item['barcode'], "Normal", 1, item['mode'], item['license_plate'], img_link])
-            
-            ws.append_rows(rows)
-            return True
-    except Exception as e:
-        st.error(f"Save Sheet Error: {e}")
-        return False
+# --- UI SETUP ---
+st.set_page_config(page_title="Smart Picking System", page_icon="📦")
 
-@st.cache_data(ttl=30)
-def load_data_from_sheet():
-    try:
-        ws = get_sheet_connection(DATA_SHEET_NAME)
-        if ws:
-            data = ws.get_all_values()
-            if len(data) > 1:
-                df = pd.DataFrame(data[1:], columns=data[0])
-                df.columns = df.columns.str.strip()
-                return df
-    except: pass
-    return pd.DataFrame()
-
-# --- INIT SESSION ---
 def init_session_state():
-    keys = {
-        'user': "", 'user_name': "", 'staged_data': [],
-        'locked_barcode': "", 'scan_error': None, 'play_sound': None,
-        'reset_key': 0, 'cam_counter': 0,
-        'scan_step': 1, 'temp_track': "", 'temp_prod': "",
-        'is_saving_mode': False
-    }
-    for k, v in keys.items():
-        if k not in st.session_state: st.session_state[k] = v
+    if 'need_reset' not in st.session_state: st.session_state.need_reset = False
+    keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
+            'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
+            'target_rider_folder_id', 'target_rider_folder_name'] # Added target folder vars
+    for k in keys:
+        if k not in st.session_state:
+            if k == 'pick_qty': st.session_state[k] = 1
+            elif k == 'cam_counter': st.session_state[k] = 0
+            elif k == 'photo_gallery': st.session_state[k] = []
+            elif k == 'current_order_items': st.session_state[k] = []
+            elif k == 'picking_phase': st.session_state[k] = 'scan'
+            else: st.session_state[k] = None if k in ['temp_login_user', 'target_rider_folder_id'] else ""
 
 init_session_state()
-
-# --- HELPERS ---
-def process_camera_scan(image_input):
-    if image_input:
-        try:
-            img = Image.open(image_input)
-            decoded_objects = decode(img)
-            if decoded_objects: return decoded_objects[0].data.decode("utf-8")
-        except: pass
-    return None
-
-def play_audio_feedback():
-    if st.session_state.play_sound == 'success':
-        st.audio("https://www.soundjay.com/buttons/sounds/button-16.mp3", format="audio/mp3", autoplay=True)
-    elif st.session_state.play_sound == 'error':
-        st.audio("https://www.soundjay.com/buttons/sounds/button-10.mp3", format="audio/mp3", autoplay=True)
-    st.session_state.play_sound = None
-
-# --- LOGIC ---
-def check_duplicate(tracking):
-    for item in st.session_state.staged_data:
-        if str(item['tracking']).strip() == str(tracking).strip():
-            return True, f"⚠️ ซ้ำในรายการรอ! ({tracking})"
-    df = load_data_from_sheet()
-    if not df.empty:
-        cols = df.columns
-        t_col = next((c for c in cols if c in ['Tracking ID', 'Order ID', 'Tracking']), None)
-        if t_col:
-            if str(tracking).strip() in df[t_col].astype(str).str.strip().values:
-                return True, f"⛔ เคยบันทึกไปแล้ว! ({tracking})"
-    return False, ""
-
-def add_to_staging(tracking, barcode, mode, license_plate):
-    st.session_state.scan_error = None
-    is_dup, msg = check_duplicate(tracking)
-    if is_dup:
-        st.session_state.scan_error = msg
-        st.session_state.play_sound = 'error'
-        st.toast(msg, icon="🚫")
-        return False
-
-    if not license_plate:
-        st.toast("⚠️ กรุณาระบุทะเบียนรถ", icon="🚛")
-
-    new_item = {
-        "id": str(uuid.uuid4()), "user": st.session_state.user, "user_name": st.session_state.user_name,
-        "license_plate": license_plate, "tracking": tracking, "barcode": barcode,
-        "mode": mode, "time_scan": datetime.now().strftime("%H:%M:%S")
-    }
-    st.session_state.staged_data.insert(0, new_item)
-    st.session_state.play_sound = 'success'
-    st.toast(f"📥 เพิ่ม: {tracking}", icon="➕")
-    return True
-
-def delete_staging(item_id):
-    st.session_state.staged_data = [d for d in st.session_state.staged_data if d['id'] != item_id]
-
-def logout_callback():
-    for k in ['user', 'user_name', 'staged_data', 'locked_barcode', 'temp_track', 'temp_prod']:
-        st.session_state[k] = "" if isinstance(st.session_state[k], str) else []
-    st.session_state.reset_key += 1; st.session_state.cam_counter += 1
-    st.session_state.scan_step = 1; st.session_state.is_saving_mode = False
-    load_data_from_sheet.clear()
-
-# --- SCAN HANDLERS ---
-def handle_scan_mode_b(scanned_val, current_lp):
-    if st.session_state.scan_step == 1:
-        st.session_state.temp_track = scanned_val
-        st.session_state.scan_step = 2
-        st.session_state.cam_counter += 1
-        st.rerun()
-    elif st.session_state.scan_step == 2:
-        st.session_state.temp_prod = scanned_val
-        if st.session_state.temp_track and st.session_state.temp_prod:
-            success = add_to_staging(st.session_state.temp_track, st.session_state.temp_prod, "Mode B", current_lp)
-            if success:
-                st.session_state.temp_track = ""; st.session_state.temp_prod = ""; st.session_state.scan_step = 1
-            else:
-                st.session_state.scan_step = 1; st.session_state.temp_track = ""; st.session_state.temp_prod = ""
-        st.session_state.cam_counter += 1
-        st.rerun()
-
-def handle_scan_mode_a(scanned_val, current_lp):
-    if not st.session_state.locked_barcode:
-        st.session_state.locked_barcode = scanned_val
-        st.session_state.cam_counter += 1
-        st.rerun()
-    else:
-        add_to_staging(scanned_val, st.session_state.locked_barcode, "Mode A", current_lp)
-        st.session_state.cam_counter += 1
-        st.rerun()
-
-# --- SAVE & UPLOAD HANDLER ---
-def final_process_save(photo_bytes, current_lp):
-    if not st.session_state.staged_data: return
-    
-    with st.spinner("🚀 กำลังบันทึกข้อมูลและอัปโหลดรูปภาพ..."):
-        drive_service = authenticate_drive()
-        
-        uploaded_link = "-"
-        # 1. Upload Photo to NEW Folder (Year > Month > Date Structure)
-        if photo_bytes and drive_service:
-            # ใช้ NEW_MAIN_FOLDER_ID ที่ตั้งค่าไว้ข้างบน
-            target_folder_id = get_target_folder_structure(drive_service, current_lp, NEW_MAIN_FOLDER_ID)
-            
-            ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            lp_clean = str(current_lp).replace(" ", "_")
-            fname = f"EVIDENCE_{lp_clean}_{ts_str}.jpg"
-            
-            upload_id = upload_photo(drive_service, photo_bytes, fname, target_folder_id)
-            if upload_id:
-                uploaded_link = f"https://drive.google.com/open?id={upload_id}"
-                st.toast("✅ อัปโหลดรูปภาพสำเร็จ")
-            else:
-                st.error("⚠️ อัปโหลดรูปภาพไม่สำเร็จ")
-        
-        # เพิ่ม Link รูปภาพ
-        for item in st.session_state.staged_data:
-            item['image_link'] = uploaded_link
-
-        # 2. Save Data to NEW Sheet
-        if save_batch_to_sheet(st.session_state.staged_data[::-1]):
-            st.success("🎉 บันทึกข้อมูลสำเร็จ!")
-            # Reset
-            st.session_state.staged_data = []
-            st.session_state.reset_key += 1
-            st.session_state.cam_counter += 1
-            st.session_state.scan_step = 1
-            st.session_state.temp_track = ""
-            st.session_state.temp_prod = ""
-            st.session_state.is_saving_mode = False 
-            
-            load_data_from_sheet.clear()
-            st.balloons()
-            time.sleep(1.5)
-            st.rerun()
-        else:
-            st.error("❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่")
-
-# ================= MAIN APP =================
-st.title("📦 New App: Scan & Pack")
-play_audio_feedback()
+check_and_execute_reset()
 
 # --- LOGIN ---
-if not st.session_state.user:
-    c1, c2, c3 = st.columns([1,2,1])
-    with c2:
-        st.info("🔒 กรุณาสแกนรหัสพนักงาน")
-        cam_key = f"cam_login_{st.session_state.cam_counter}"
-        login_img = back_camera_input("แตะเพื่อสแกนบัตร", key=cam_key)
-        scanned_id = process_camera_scan(login_img)
+if not st.session_state.current_user_name:
+    st.title("🔐 Login พนักงาน")
+    df_users = load_sheet_data(USER_SHEET_NAME)
+
+    if st.session_state.temp_login_user is None:
+        st.info("กรุณาสแกนรหัสพนักงาน")
+        col1, col2 = st.columns([3, 1])
+        manual_user = col1.text_input("พิมพ์รหัสพนักงาน", key="input_user_manual").strip()
+        cam_key_user = f"cam_user_{st.session_state.cam_counter}"
+        scan_user = back_camera_input("แตะเพื่อสแกนบัตรพนักงาน", key=cam_key_user)
         
-        if scanned_id:
-            found, name = verify_user_login(scanned_id)
-            if found:
-                st.session_state.user = scanned_id; st.session_state.user_name = name
-                st.session_state.cam_counter += 1; st.rerun()
-            else: st.error("❌ ไม่พบรหัสพนักงาน (ตรวจสอบไฟล์ User ใหม่)")
+        user_input_val = None
+        if manual_user: user_input_val = manual_user
+        elif scan_user:
+            res_u = decode(Image.open(scan_user))
+            if res_u: user_input_val = res_u[0].data.decode("utf-8")
         
-        u_in = st.text_input("หรือพิมพ์รหัส", key="login_input")
-        if st.button("Login") and u_in:
-             found, name = verify_user_login(u_in)
-             if found:
-                st.session_state.user = u_in; st.session_state.user_name = name
-                st.rerun()
+        if user_input_val:
+            if not df_users.empty and len(df_users.columns) >= 3:
+                match = df_users[df_users.iloc[:, 0].astype(str) == str(user_input_val)]
+                if not match.empty:
+                    st.session_state.temp_login_user = {'id': str(user_input_val), 'pass': str(match.iloc[0, 1]).strip(), 'name': match.iloc[0, 2]}
+                    st.rerun()
+                else: st.error(f"❌ ไม่พบรหัสพนักงาน: {user_input_val}")
+            else: st.warning("⚠️ โหลดข้อมูลพนักงานไม่ได้")
+    else:
+        user_info = st.session_state.temp_login_user
+        st.info(f"👤 พนักงาน: **{user_info['name']}** ({user_info['id']})")
+        password_input = st.text_input("🔑 กรุณากรอกรหัสผ่าน", type="password", key="login_pass_input").strip()
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("✅ ยืนยัน Login", type="primary", use_container_width=True):
+                if password_input == user_info['pass']:
+                    st.session_state.current_user_id = user_info['id']
+                    st.session_state.current_user_name = user_info['name']
+                    st.session_state.temp_login_user = None
+                    st.toast(f"ยินดีต้อนรับคุณ {user_info['name']} 👋", icon="✅")
+                    time.sleep(1); st.rerun()
+                else: st.error("❌ รหัสผ่านไม่ถูกต้อง")
+        with c2:
+            if st.button("⬅️ เปลี่ยน User", use_container_width=True):
+                st.session_state.temp_login_user = None; st.rerun()
 else:
     # --- LOGGED IN ---
-    with st.container():
-        st.markdown(f"""
-        <div class="user-header">
-            <b>👤 {st.session_state.user_name}</b> ({st.session_state.user})
-        </div>""", unsafe_allow_html=True)
-        col_nul, col_out = st.columns([4,1])
-        with col_out: st.button("🚪 Logout", on_click=logout_callback, use_container_width=True)
+    with st.sidebar:
+        st.write(f"👤 **{st.session_state.current_user_name}**")
+        mode = st.radio("เลือกโหมดทำงาน:", ["📦 แผนกแพ็คสินค้า", "🏍️ ส่งงาน Rider"])
+        st.divider()
+        if st.button("Logout", type="secondary"): logout_user()
 
-    t1, t2 = st.tabs(["📷 Scan Center", "📊 History"])
+    # ================= MODE 1: PACKING =================
+    if mode == "📦 แผนกแพ็คสินค้า":
+        st.title("📦 ระบบเบิก-แพ็คสินค้า")
+        df_items = load_sheet_data(0)
 
-    with t1:
-        if st.session_state.is_saving_mode:
-            # === หน้าถ่ายรูปปิดงาน ===
-            st.markdown('<div class="final-cam-box">', unsafe_allow_html=True)
-            st.markdown("### 📸 กรุณาถ่ายรูปปิดตู้/ปิดงาน")
-            st.caption("ถ่ายรูปสภาพสินค้าที่แพ็คเสร็จแล้วเพื่อเป็นหลักฐาน")
-            
-            evidence_photo = st.camera_input("กดปุ่มถ่ายรูป", label_visibility="collapsed")
-            
-            c_conf1, c_conf2 = st.columns(2)
-            with c_conf1:
-                if st.button("⬅️ ย้อนกลับ", use_container_width=True):
-                    st.session_state.is_saving_mode = False
-                    st.rerun()
-            with c_conf2:
-                if evidence_photo:
-                    if st.button("🚀 ยืนยัน Upload & Save", type="primary", use_container_width=True):
-                        lp_for_save = "Unknown"
-                        if st.session_state.staged_data:
-                            lp_for_save = st.session_state.staged_data[0]['license_plate']
-                        
-                        final_process_save(evidence_photo.getvalue(), lp_for_save)
+        if st.session_state.picking_phase == 'scan':
+            st.markdown("#### 1. Order ID")
+            if not st.session_state.order_val:
+                col1, col2 = st.columns([3, 1])
+                manual_order = col1.text_input("พิมพ์ Order ID", key="pack_order_man").strip().upper()
+                if manual_order: st.session_state.order_val = manual_order; st.rerun()
+                scan_order = back_camera_input("แตะเพื่อสแกน Order", key=f"pack_cam_{st.session_state.cam_counter}")
+                if scan_order:
+                    res = decode(Image.open(scan_order))
+                    if res: st.session_state.order_val = res[0].data.decode("utf-8").upper(); st.rerun()
+            else:
+                c1, c2 = st.columns([3, 1])
+                with c1: st.success(f"📦 Order: **{st.session_state.order_val}**")
+                with c2: 
+                    if st.button("เปลี่ยน Order"): trigger_reset(); st.rerun()
+
+            if st.session_state.order_val:
+                st.markdown("---"); st.markdown("#### 2. เพิ่มรายการสินค้า (Scan & Add)")
+                if not st.session_state.prod_val:
+                    col1, col2 = st.columns([3, 1])
+                    manual_prod = col1.text_input("พิมพ์ Barcode", key="pack_prod_man").strip()
+                    if manual_prod: st.session_state.prod_val = manual_prod; st.rerun()
+                    scan_prod = back_camera_input("แตะเพื่อสแกนสินค้า", key=f"prod_cam_{st.session_state.cam_counter}")
+                    if scan_prod:
+                        res_p = decode(Image.open(scan_prod))
+                        if res_p: st.session_state.prod_val = res_p[0].data.decode("utf-8"); st.rerun()
                 else:
-                    st.warning("⚠️ กรุณาถ่ายรูปก่อนกดบันทึก")
-            st.markdown('</div>', unsafe_allow_html=True)
+                    target_loc_str = None; prod_found = False
+                    if not df_items.empty:
+                        match = df_items[df_items['Barcode'] == st.session_state.prod_val]
+                        if not match.empty:
+                            prod_found = True; row = match.iloc[0]
+                            try: brand = str(row.iloc[3]); variant = str(row.iloc[5]); full_name = f"{brand} {variant}"
+                            except: full_name = "Error Name"
+                            st.session_state.prod_display_name = full_name
+                            target_loc_str = f"{str(row.get('Zone','')).strip()}-{str(row.get('Location','')).strip()}"
+                            st.success(f"✅ **{full_name}**"); st.warning(f"📍 เป้าหมาย: **{target_loc_str}**")
+                        else: st.error("❌ ไม่พบ Barcode")
+                    else: st.warning("⚠️ Loading Data...")
+                    
+                    if st.button("❌ สแกนใหม่"): 
+                        st.session_state.prod_val = ""; st.session_state.cam_counter += 1; st.rerun()
 
-            st.markdown("---")
-            st.subheader("รายการที่จะบันทึก:")
-            st.dataframe(pd.DataFrame(st.session_state.staged_data)[['tracking', 'barcode', 'license_plate']], use_container_width=True)
-
-        else:
-            # === หน้าสแกนปกติ ===
-            st.markdown('<div class="vehicle-box">', unsafe_allow_html=True)
-            c_v1, c_v2 = st.columns([1, 4])
-            with c_v1: st.markdown("### 🚛")
-            with c_v2:
-                current_lp = st.text_input("ทะเบียนรถ", placeholder="ระบุทะเบียน...", key=f"lp_{st.session_state.reset_key}")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            if st.session_state.scan_error:
-                st.error(st.session_state.scan_error)
-                if st.button("ล้างข้อความ"): st.session_state.scan_error = None; st.rerun()
-
-            mode = st.radio("โหมดการทำงาน:", ["🚀 งาน Lot (Mode A)", "📦 งานเดี่ยว (Mode B)"], horizontal=True)
-            st.divider()
-            
-            if "Mode A" in mode:
-                if not st.session_state.locked_barcode:
-                    st.info("🟡 สถานะ: รอสแกน UPC")
-                    cam_label = "📸 สแกน UPC"
-                else:
-                    st.success(f"🔒 สินค้า: {st.session_state.locked_barcode}")
-                    st.info("🟢 สถานะ: รอสแกน Tracking")
-                    cam_label = "📸 สแกน Tracking"
-                    if st.button("เปลี่ยน UPC"):
-                        st.session_state.locked_barcode = ""; st.rerun()
-
-                img_input = back_camera_input(cam_label, key=f"cam_A_{st.session_state.cam_counter}")
-                res = process_camera_scan(img_input)
-                if res: handle_scan_mode_a(res, current_lp)
-                
-                with st.expander("⌨️ พิมพ์เอง (Mode A)"):
-                    with st.form("manual_a_form", clear_on_submit=True):
-                        if not st.session_state.locked_barcode:
-                            st.markdown("**ระบุ Barcode สินค้าหลัก (UPC):**")
-                            man_input_a = st.text_input("UPC / Barcode", key="man_a_upc")
-                            submit_label_a = "🔒 ล็อค UPC"
+                    if prod_found and target_loc_str:
+                        st.markdown("---"); st.markdown("##### ยืนยัน Location")
+                        if not st.session_state.loc_val:
+                            man_loc = st.text_input("Scan/พิมพ์ Location", key="loc_man").strip().upper()
+                            if man_loc: st.session_state.loc_val = man_loc; st.rerun()
+                            scan_loc = back_camera_input("แตะเพื่อสแกน Location", key=f"loc_cam_{st.session_state.cam_counter}")
+                            if scan_loc:
+                                res_l = decode(Image.open(scan_loc))
+                                if res_l: st.session_state.loc_val = res_l[0].data.decode("utf-8").upper(); st.rerun()
                         else:
-                            st.markdown(f"**ระบุ Tracking สำหรับ:** `{st.session_state.locked_barcode}`")
-                            man_input_a = st.text_input("Tracking ID", key="man_a_track")
-                            submit_label_a = "📥 บันทึก Tracking"
+                            if st.session_state.loc_val == target_loc_str or st.session_state.loc_val in target_loc_str:
+                                st.success(f"✅ ถูกต้อง: {st.session_state.loc_val}")
+                                st.markdown("##### ระบุจำนวน")
+                                st.session_state.pick_qty = st.number_input("จำนวน (Qty)", min_value=1, value=1)
+                                st.markdown("---")
+                                if st.button("➕ เพิ่มลงตะกร้า", type="primary", use_container_width=True):
+                                    new_item = {"Barcode": st.session_state.prod_val, "Product Name": st.session_state.prod_display_name, "Location": st.session_state.loc_val, "Qty": st.session_state.pick_qty}
+                                    st.session_state.current_order_items.append(new_item)
+                                    st.toast(f"เพิ่ม {st.session_state.prod_display_name} แล้ว!", icon="🛒")
+                                    st.session_state.prod_val = ""; st.session_state.loc_val = ""; st.session_state.pick_qty = 1; st.session_state.cam_counter += 1
+                                    st.rerun()
+                            else:
+                                st.error(f"❌ ผิดตำแหน่ง ({st.session_state.loc_val})")
+                                if st.button("แก้ Location"): st.session_state.loc_val = ""; st.rerun()
 
-                        if st.form_submit_button(submit_label_a):
-                            if man_input_a:
-                                handle_scan_mode_a(man_input_a, current_lp)
+                if st.session_state.current_order_items:
+                    st.markdown("---")
+                    st.markdown(f"### 🛒 ตะกร้าสินค้า ({len(st.session_state.current_order_items)} รายการ)")
+                    st.dataframe(pd.DataFrame(st.session_state.current_order_items), use_container_width=True)
+                    if st.button("✅ ยืนยันรายการครบแล้ว (ไปถ่ายรูป)", type="primary", use_container_width=True):
+                        st.session_state.picking_phase = 'pack'; st.rerun()
+
+        elif st.session_state.picking_phase == 'pack':
+            st.success(f"📦 Order: **{st.session_state.order_val}** (ยืนยันแล้ว)")
+            st.info("รายการสินค้าที่จะแพ็ค:")
+            st.dataframe(pd.DataFrame(st.session_state.current_order_items), use_container_width=True)
+            st.markdown("#### 3. ถ่ายรูปปิดกล่อง (รวมทุกชิ้น)")
+            
+            if st.session_state.photo_gallery:
+                cols = st.columns(5)
+                for idx, img in enumerate(st.session_state.photo_gallery):
+                    with cols[idx]:
+                        st.image(img, use_column_width=True)
+                        if st.button("🗑️", key=f"del_{idx}"): st.session_state.photo_gallery.pop(idx); st.rerun()
+            
+            if len(st.session_state.photo_gallery) < 5:
+                pack_img = back_camera_input("ถ่ายรูปสินค้ากองรวม (กล้องหลัง)", key=f"pack_cam_fin_{st.session_state.cam_counter}")
+                if pack_img:
+                    img_pil = Image.open(pack_img)
+                    if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
+                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG')
+                    st.session_state.photo_gallery.append(buf.getvalue())
+                    st.session_state.cam_counter += 1; st.rerun()
+            
+            col_b1, col_b2 = st.columns([1, 1])
+            with col_b1:
+                if st.button("⬅️ กลับไปแก้ไขรายการ"): st.session_state.picking_phase = 'scan'; st.session_state.photo_gallery = []; st.rerun()
+            with col_b2:
+                if len(st.session_state.photo_gallery) > 0:
+                    if st.button("☁️ ยืนยัน Upload ทั้งหมด", type="primary", use_container_width=True):
+                        with st.spinner("กำลังบันทึกข้อมูล..."):
+                            srv = authenticate_drive()
+                            if srv:
+                                fid = get_target_folder_structure(srv, st.session_state.order_val, MAIN_FOLDER_ID)
+                                ts = get_thai_ts_filename()
+                                
+                                # 1. หาจำนวนรูปทั้งหมดก่อน
+                                total_imgs = len(st.session_state.photo_gallery)
+                                final_image_link_id = "" # เตรียมตัวแปรไว้เก็บ ID รูปสุดท้าย
+
+                                for i, b in enumerate(st.session_state.photo_gallery):
+                                    # i เริ่มที่ 0, 1, 2...
+                                    current_seq = i + 1 
+                                    
+                                    # ตั้งชื่อไฟล์ให้มีลำดับชัดเจน Img1, Img2, ...
+                                    fn = f"{st.session_state.order_val}_PACKED_{ts}_Img{current_seq}.jpg"
+                                    uid = upload_photo(srv, b, fn, fid)
+                                    
+                                    # 2. เช็คเงื่อนไข: "ถ้านี่คือรอบสุดท้าย ให้จำ ID นี้ไว้"
+                                    if current_seq == total_imgs:
+                                        final_image_link_id = uid
+                                
+                                # 3. บันทึกลง Sheet (ใช้ ID ที่เราดักจับไว้)
+                                # ถ้าไม่มีรูปเลย (กัน Error) ให้ใส่ขีด -
+                                if not final_image_link_id: final_image_link_id = "-"
+
+                                for item in st.session_state.current_order_items:
+                                    save_log_to_sheet(
+                                        st.session_state.current_user_name, 
+                                        st.session_state.order_val, 
+                                        item['Barcode'], 
+                                        item['Product Name'], 
+                                        item['Location'], 
+                                        item['Qty'], 
+                                        st.session_state.current_user_id, 
+                                        final_image_link_id  # <--- ส่ง Link รูปสุดท้ายไปบันทึก
+                                    )
+                                    
+                                st.balloons()
+                                st.success("✅ บันทึกครบทุกรายการเรียบร้อย!")
+                                time.sleep(1.5)
+                                trigger_reset()
                                 st.rerun()
 
-            else:
-                c_s1, c_s2 = st.columns(2)
-                with c_s1:
-                    if st.session_state.scan_step == 1:
-                        st.markdown(f'<div class="status-step step-active">1. รอสแกน Tracking ⏳</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<div class="status-step step-done">Tracking: {st.session_state.temp_track} ✅</div>', unsafe_allow_html=True)
-                
-                with c_s2:
-                    if st.session_state.scan_step == 1:
-                        st.markdown(f'<div class="status-step step-pending">2. รอ Barcode</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<div class="status-step step-active">2. รอสแกน Barcode ⏳</div>', unsafe_allow_html=True)
+    # ================= MODE 2: RIDER =================
+    elif mode == "🏍️ ส่งงาน Rider":
+        st.title("🏍️ ส่งงาน Rider")
+        st.info("ถ่ายรูปเพิ่มเติมเพื่อส่งให้ Rider (จะบันทึกลง Folder เดิม)")
 
-                if st.session_state.scan_step == 2:
-                    if st.button("❌ ยกเลิก/เริ่มใหม่"):
-                        st.session_state.scan_step = 1; st.session_state.temp_track = ""; st.session_state.temp_prod = ""; st.rerun()
+        st.markdown("#### 1. สแกน Order ที่จะส่ง")
+        col_r1, col_r2 = st.columns([3, 1])
+        man_rider_ord = col_r1.text_input("พิมพ์ Order ID", key="rider_ord_man").strip().upper()
+        
+        # Camera Input
+        scan_rider_ord = back_camera_input("แตะเพื่อสแกน Order", key=f"rider_cam_ord_{st.session_state.cam_counter}")
+        
+        current_rider_order = ""
+        if man_rider_ord: current_rider_order = man_rider_ord
+        elif scan_rider_ord:
+            res = decode(Image.open(scan_rider_ord))
+            if res: current_rider_order = res[0].data.decode("utf-8").upper()
 
-                cam_label = "📸 สแกน Tracking ID" if st.session_state.scan_step == 1 else "📸 สแกน Barcode สินค้า"
+        if current_rider_order:
+            st.session_state.order_val = current_rider_order
+            with st.spinner(f"🔍 กำลังหา Folder ของ {current_rider_order}..."):
+                srv = authenticate_drive()
+                if srv:
+                    folder_id, folder_name = find_existing_order_folder(srv, current_rider_order, MAIN_FOLDER_ID)
+                    if folder_id:
+                        st.success(f"✅ เจอ Folder: **{folder_name}**")
+                        st.session_state.target_rider_folder_id = folder_id; st.session_state.target_rider_folder_name = folder_name
+                    else: 
+                        st.error(f"❌ {folder_name}")
+                        st.session_state.target_rider_folder_id = None
+                        st.session_state.target_rider_folder_name = ""
 
-                img_input = back_camera_input(cam_label, key=f"cam_B_{st.session_state.cam_counter}")
-                res = process_camera_scan(img_input)
-                if res: handle_scan_mode_b(res, current_lp)
-
-                with st.expander("⌨️ พิมพ์เอง (Mode B)"):
-                    with st.form("manual_b_form", clear_on_submit=True):
-                        m_track = st.text_input("Tracking")
-                        m_prod = st.text_input("Barcode")
-                        if st.form_submit_button("บันทึก"):
-                            if m_track and m_prod:
-                                add_to_staging(m_track, m_prod, "Mode B", current_lp); st.rerun()
-
-            cnt = len(st.session_state.staged_data)
-            c_h1, c_h2 = st.columns([3, 1])
-            with c_h1: st.subheader(f"📋 รายการรอ ({cnt})")
-            with c_h2:
-                if cnt > 0:
-                    if st.button(f"📸 ถ่ายรูป & บันทึก ({cnt})", type="primary", use_container_width=True):
-                        st.session_state.is_saving_mode = True
-                        st.rerun()
-
-            if cnt > 0:
-                with st.container(border=True):
-                    cols = st.columns([1, 2, 3, 3, 1])
-                    for col, h in zip(cols, ["เวลา", "ทะเบียน", "Tracking", "Barcode", "ลบ"]): col.markdown(f"**{h}**")
-                    st.divider()
-                    for item in st.session_state.staged_data:
-                        c1, c2, c3, c4, c5 = st.columns([1, 2, 3, 3, 1])
-                        c1.caption(item['time_scan'])
-                        c2.caption(item['license_plate'])
-                        c3.write(item['tracking'])
-                        c4.write(item['barcode'])
-                        c5.button("❌", key=f"d_{item['id']}", on_click=delete_staging, args=(item['id'],))
-
-    with t2:
-        if st.button("🔄 Refresh"): load_data_from_sheet.clear(); st.rerun()
-        df = load_data_from_sheet()
-        if not df.empty: st.dataframe(df.tail(15), use_container_width=True)
+        if st.session_state.get('target_rider_folder_id') and st.session_state.order_val:
+            st.markdown("---"); st.markdown(f"#### 2. ถ่ายรูปส่งมอบ ({st.session_state.target_rider_folder_name})")
+            rider_img_input = back_camera_input("ถ่ายรูปส่งมอบ", key=f"rider_cam_act_{st.session_state.cam_counter}")
+            
+            if rider_img_input:
+                st.image(rider_img_input, caption="รูปที่จะส่ง", width=300)
+                col_upload, col_clear = st.columns([2, 1])
+                with col_clear:
+                    if st.button("🗑️ ซ่อน/ถ่ายใหม่", type="secondary", use_container_width=True):
+                         st.session_state.cam_counter += 1; st.rerun()
+                with col_upload:
+                    if st.button("🚀 ยืนยันส่งรูปนี้", type="primary", use_container_width=True):
+                        with st.spinner("Uploading..."):
+                            srv = authenticate_drive()
+                            ts = get_thai_ts_filename()
+                            fn = f"RIDER_{st.session_state.order_val}_{ts}.jpg"
+                            uid = upload_photo(srv, rider_img_input, fn, st.session_state.target_rider_folder_id)
+                            save_rider_log(st.session_state.current_user_name, st.session_state.order_val, uid, st.session_state.target_rider_folder_name)
+                            st.success("บันทึกรูป Rider สำเร็จ!")
+                            time.sleep(1.5)
+                            trigger_reset(); st.rerun()
