@@ -331,11 +331,11 @@ else:
 
     # ================= MODE 1: PACKING =================
     if mode == "📦 แผนกแพ็คสินค้า":
-        st.title("📦 ระบบเบิก-แพ็คสินค้า")
+        st.title("📦 ระบบแพ็คสินค้า")
         df_items = load_sheet_data(0)
 
         if st.session_state.picking_phase == 'scan':
-            st.markdown("#### 1. Order ID")
+            st.markdown("#### 1. Scan Tracking")
             if not st.session_state.order_val:
                 col1, col2 = st.columns([3, 1])
                 manual_order = col1.text_input("พิมพ์ Order ID", key="pack_order_man").strip().upper()
@@ -424,7 +424,7 @@ else:
                 if pack_img:
                     img_pil = Image.open(pack_img)
                     if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
-                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG')
+                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG', quality=95, optimize=True) #<< เพิ่มความคมชัด
                     st.session_state.photo_gallery.append(buf.getvalue())
                     st.session_state.cam_counter += 1; st.rerun()
             
