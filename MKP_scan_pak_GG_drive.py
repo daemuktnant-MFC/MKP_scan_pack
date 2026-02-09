@@ -440,14 +440,6 @@ else:
                 res = process_camera_scan(img_input)
                 if res: handle_scan_mode_a(res, current_lp)
 
-                 with st.expander("⌨️ พิมพ์เอง"):
-                    with st.form("manual_b_form", clear_on_submit=True):
-                        m_track = st.text_input("Tracking")
-                        m_prod = st.text_input("Barcode")
-                        if st.form_submit_button("บันทึก"):
-                            if m_track and m_prod:
-                                add_to_staging(m_track, m_prod, "Mode B", current_lp); st.rerun()
-
             else:
                 # Mode B Logic
                 c_s1, c_s2 = st.columns(2)
