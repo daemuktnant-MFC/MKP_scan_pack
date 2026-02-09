@@ -12,18 +12,6 @@ import time
 from googleapiclient.errors import HttpError
 import json
 
-# --- DEBUG CONNECTION ---
-# st.write("Testing Connection...")
-# try:
-#     creds = get_credentials()
-#     gc = gspread.authorize(creds)
-#     sh = gc.open_by_key(SHEET_ID)
-#     ws = sh.worksheet(USER_SHEET_NAME)
-#     st.success(f"✅ เชื่อมต่อ Google Sheet สำเร็จ! เจอข้อมูล {len(ws.get_all_values())} แถว")
-# except Exception as e:
-#     st.error(f"❌ เชื่อมต่อไม่ได้: {e}")
-#     st.stop()
-
 # --- IMPORT LIBRARY กล้อง ---
 try:
     from streamlit_back_camera_input import back_camera_input
@@ -127,13 +115,20 @@ def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
 
-def save_rider_log(picker_name, order_id, file_id, folder_name):
+# --- [MODIFIED] เพิ่มพารามิเตอร์ license_plate ---
+def save_rider_log(picker_name, order_id, file_id, folder_name, license_plate="-"):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
-        try: worksheet = sh.worksheet(RIDER_SHEET_NAME)
-        except: worksheet = sh.add_worksheet(title=RIDER_SHEET_NAME, rows="1000", cols="10"); worksheet.append_row(["Timestamp", "User Name", "Order ID", "Folder Name", "Rider Image Link"])
+        try: 
+            worksheet = sh.worksheet(RIDER_SHEET_NAME)
+        except: 
+            # สร้าง Sheet ใหม่ถ้ายังไม่มี พร้อม Header ที่อัปเดตแล้ว
+            worksheet = sh.add_worksheet(title=RIDER_SHEET_NAME, rows="1000", cols="10")
+            worksheet.append_row(["Timestamp", "User Name", "Order ID", "License Plate", "Folder Name", "Rider Image Link"])
+            
         timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
-        worksheet.append_row([timestamp, picker_name, order_id, folder_name, image_link])
+        # บันทึกทะเบียนรถลงไปด้วย
+        worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, image_link])
     except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
 
 # --- [MODIFIED] FOLDER STRUCTURE LOGIC ---
@@ -256,6 +251,7 @@ def check_and_execute_reset():
         if 'rider_ord_man' in st.session_state: st.session_state.rider_ord_man = ""
         if 'pack_prod_man' in st.session_state: st.session_state.pack_prod_man = ""
         if 'loc_man' in st.session_state: st.session_state.loc_man = ""
+        if 'rider_lp_input' in st.session_state: st.session_state.rider_lp_input = "" # Reset ทะเบียนรถด้วย
         
         # Reset State Variables
         st.session_state.order_val = ""
@@ -291,7 +287,7 @@ def init_session_state():
     if 'need_reset' not in st.session_state: st.session_state.need_reset = False
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
-            'target_rider_folder_id', 'target_rider_folder_name'] # Added target folder vars
+            'target_rider_folder_id', 'target_rider_folder_name', 'rider_lp_val'] # Added rider_lp_val
     for k in keys:
         if k not in st.session_state:
             if k == 'pick_qty': st.session_state[k] = 1
@@ -512,6 +508,11 @@ else:
         st.title("🚚 Scan ปิดตู้")
         st.info("ถ่ายรูปเพิ่มเติมเพื่อส่งให้ Rider (จะบันทึกลง Folder เดิม)")
 
+        # --- [ADDED] 0. ระบุทะเบียนรถ ---
+        st.markdown("#### 0. ระบุทะเบียนรถ (Optional)")
+        rider_lp = st.text_input("🚛 ทะเบียนรถ", key="rider_lp_input", placeholder="กรอกทะเบียนรถที่มารับสินค้า...").strip()
+        # ----------------------------------
+
         st.markdown("#### 1. สแกน Order ที่จะส่ง")
         col_r1, col_r2 = st.columns([3, 1])
         man_rider_ord = col_r1.text_input("พิมพ์ Order ID", key="rider_ord_man").strip().upper()
@@ -554,9 +555,23 @@ else:
                         with st.spinner("Uploading..."):
                             srv = authenticate_drive()
                             ts = get_thai_ts_filename()
-                            fn = f"RIDER_{st.session_state.order_val}_{ts}.jpg"
+                            
+                            # เตรียมชื่อไฟล์ (ใส่ทะเบียนรถถ้ามี)
+                            rider_lp_val = rider_lp if rider_lp else "NoPlate"
+                            lp_clean = rider_lp_val.replace(" ", "_")
+                            fn = f"RIDER_{st.session_state.order_val}_{lp_clean}_{ts}.jpg"
+                            
                             uid = upload_photo(srv, rider_img_input, fn, st.session_state.target_rider_folder_id)
-                            save_rider_log(st.session_state.current_user_name, st.session_state.order_val, uid, st.session_state.target_rider_folder_name)
+                            
+                            # ส่งทะเบียนรถไปบันทึกด้วย
+                            save_rider_log(
+                                st.session_state.current_user_name, 
+                                st.session_state.order_val, 
+                                uid, 
+                                st.session_state.target_rider_folder_name,
+                                rider_lp_val
+                            )
+                            
                             st.success("บันทึกรูป Rider สำเร็จ!")
                             time.sleep(1.5)
                             trigger_reset(); st.rerun()
