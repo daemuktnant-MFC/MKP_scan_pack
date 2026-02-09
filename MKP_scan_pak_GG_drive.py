@@ -439,6 +439,23 @@ else:
                 img_input = back_camera_input(cam_label, key=f"cam_A_{st.session_state.cam_counter}")
                 res = process_camera_scan(img_input)
                 if res: handle_scan_mode_a(res, current_lp)
+                
+                # --- [เพิ่ม] ส่วน Manual Input สำหรับ Mode A ---
+                with st.expander("⌨️ พิมพ์เอง (Mode A)"):
+                    with st.form("manual_a_form", clear_on_submit=True):
+                        if not st.session_state.locked_barcode:
+                            st.markdown("**ระบุ Barcode สินค้าหลัก (UPC):**")
+                            man_input_a = st.text_input("UPC / Barcode", key="man_a_upc")
+                            submit_label_a = "🔒 ล็อค UPC"
+                        else:
+                            st.markdown(f"**ระบุ Tracking สำหรับ:** `{st.session_state.locked_barcode}`")
+                            man_input_a = st.text_input("Tracking ID", key="man_a_track")
+                            submit_label_a = "📥 บันทึก Tracking"
+
+                        if st.form_submit_button(submit_label_a):
+                            if man_input_a:
+                                handle_scan_mode_a(man_input_a, current_lp)
+                                st.rerun()
 
             else:
                 # Mode B Logic
@@ -465,7 +482,7 @@ else:
                 res = process_camera_scan(img_input)
                 if res: handle_scan_mode_b(res, current_lp)
 
-                with st.expander("⌨️ พิมพ์เอง"):
+                with st.expander("⌨️ พิมพ์เอง (Mode B)"):
                     with st.form("manual_b_form", clear_on_submit=True):
                         m_track = st.text_input("Tracking")
                         m_prod = st.text_input("Barcode")
