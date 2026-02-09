@@ -424,7 +424,7 @@ else:
                 if pack_img:
                     img_pil = Image.open(pack_img)
                     if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
-                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG', quality=95, optimize=True) #<< เพิ่มความคมชัด
+                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG', quality=120, optimize=True) #<< เพิ่มความคมชัด
                     st.session_state.photo_gallery.append(buf.getvalue())
                     st.session_state.cam_counter += 1; st.rerun()
             
