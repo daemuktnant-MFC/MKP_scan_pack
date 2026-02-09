@@ -115,129 +115,91 @@ def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
 
-# --- [MODIFIED] เพิ่มพารามิเตอร์ license_plate ---
+# --- RIDER LOG ---
 def save_rider_log(picker_name, order_id, file_id, folder_name, license_plate="-"):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
         try: 
             worksheet = sh.worksheet(RIDER_SHEET_NAME)
         except: 
-            # สร้าง Sheet ใหม่ถ้ายังไม่มี พร้อม Header ที่อัปเดตแล้ว
             worksheet = sh.add_worksheet(title=RIDER_SHEET_NAME, rows="1000", cols="10")
             worksheet.append_row(["Timestamp", "User Name", "Order ID", "License Plate", "Folder Name", "Rider Image Link"])
-            
         timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
-        # บันทึกทะเบียนรถลงไปด้วย
         worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, image_link])
     except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
 
-# --- [MODIFIED] FOLDER STRUCTURE LOGIC ---
+# --- FOLDER STRUCTURE LOGIC ---
 def get_target_folder_structure(service, order_id, main_parent_id):
-    # คำนวณวันเวลาปัจจุบัน
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
     month_str = now.strftime("%m")
     date_str = now.strftime("%d-%m-%Y")
 
-    # Helper function: ค้นหาหรือสร้าง Folder
     def _get_or_create(parent_id, name):
         q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         res = service.files().list(q=q, fields="files(id)").execute()
         files = res.get('files', [])
         if files: return files[0]['id']
-        
-        # ถ้าไม่เจอให้สร้างใหม่
         meta = {'name': name, 'parents': [parent_id], 'mimeType': 'application/vnd.google-apps.folder'}
         folder = service.files().create(body=meta, fields='id').execute()
         return folder.get('id')
 
-    # Step 1: จัดการ Folder ปี (YYYY)
     year_id = _get_or_create(main_parent_id, year_str)
-    
-    # Step 2: จัดการ Folder เดือน (MM)
     month_id = _get_or_create(year_id, month_str)
-    
-    # Step 3: จัดการ Folder วันที่ (DD-MM-YYYY)
     date_id = _get_or_create(month_id, date_str)
 
-    # Step 4: สร้าง Folder Order (OrderNumber_HH-MM)
     time_suffix = now.strftime("%H-%M")
     order_folder_name = f"{order_id}_{time_suffix}"
     meta_order = {'name': order_folder_name, 'parents': [date_id], 'mimeType': 'application/vnd.google-apps.folder'}
     order_folder = service.files().create(body=meta_order, fields='id').execute()
-    
     return order_folder.get('id')
 
 def find_existing_order_folder(service, order_id, main_parent_id):
-    # คำนวณวันเวลาปัจจุบันเพื่อหา Path
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
     month_str = now.strftime("%m")
     date_str = now.strftime("%d-%m-%Y")
 
-    # Helper function: ค้นหา Folder (คืนค่า None ถ้าไม่เจอ)
     def _find_folder(parent_id, name):
         q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         res = service.files().list(q=q, fields="files(id)").execute()
         files = res.get('files', [])
         return files[0]['id'] if files else None
 
-    # Step 1: หา Folder ปี (YYYY)
     year_id = _find_folder(main_parent_id, year_str)
     if not year_id: return None, "ไม่พบ Folder ปีปัจจุบัน"
-
-    # Step 2: หา Folder เดือน (MM)
     month_id = _find_folder(year_id, month_str)
     if not month_id: return None, "ไม่พบ Folder เดือนปัจจุบัน"
-
-    # Step 3: หา Folder วันที่ (DD-MM-YYYY)
     date_id = _find_folder(month_id, date_str)
-    if not date_id: return None, "ไม่พบ Folder วันที่ของวันนี้ (ยังไม่มีการเปิดบิลวันนี้)"
+    if not date_id: return None, "ไม่พบ Folder วันที่ของวันนี้"
     
-    # Step 4: หา Folder Order ภายใต้ Folder วันที่
-    # 1. ค้นหาแบบกว้างๆ ก่อน
     q_order = f"'{date_id}' in parents and name contains '{order_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     res_order = service.files().list(q=q_order, fields="files(id, name)", orderBy="createdTime desc").execute()
     files_order = res_order.get('files', [])
     
-    # 2. กรองให้ชัวร์ว่าขึ้นต้นด้วย OrderID_
-    target_prefix = f"{order_id}_" # เช่น "B01_"
-    
+    target_prefix = f"{order_id}_"
     found_folder = None
     for f in files_order:
         if f['name'].startswith(target_prefix):
             found_folder = f
             break
             
-    if found_folder:
-        return found_folder['id'], found_folder['name']
-    else:
-        return None, f"ไม่พบ Folder ของ Order: {order_id} ในวันนี้"
-# ---------------------------------------------
+    if found_folder: return found_folder['id'], found_folder['name']
+    else: return None, f"ไม่พบ Folder ของ Order: {order_id} ในวันนี้"
 
 def upload_photo(service, file_obj, filename, folder_id):
     try:
         file_metadata = {'name': filename, 'parents': [folder_id]}
-        
-        if isinstance(file_obj, bytes): 
-            media_body = io.BytesIO(file_obj)
-        else: 
-            media_body = file_obj 
-            
+        if isinstance(file_obj, bytes): media_body = io.BytesIO(file_obj)
+        else: media_body = file_obj 
         media = MediaIoBaseUpload(media_body, mimetype='image/jpeg', chunksize=1024*1024, resumable=True)
-        
-        # --- จุดที่แก้: เพิ่มการดักจับ Error เพื่อดูรายละเอียด ---
         file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return file.get('id')
-
     except HttpError as error:
-        # แปลง Error เป็นข้อความที่อ่านออก
         error_reason = json.loads(error.content.decode('utf-8'))
-        print(f"❌ DRIVE ERROR DETAILS: {error_reason}") # จะโชว์ใน Logs ของ Streamlit Cloud
-        st.error(f"Google Drive Error: {error_reason}") # จะโชว์หน้าจอ App
-        raise error # ส่ง Error ต่อไปให้โปรแกรมหยุดทำงาน
+        st.error(f"Google Drive Error: {error_reason}")
+        raise error
     except Exception as e:
-        print(f"❌ GENERAL ERROR: {e}")
         raise e
 
 # --- SAFE RESET SYSTEM ---
@@ -246,39 +208,35 @@ def trigger_reset():
 
 def check_and_execute_reset():
     if st.session_state.get('need_reset'):
-        # Reset Widgets
         if 'pack_order_man' in st.session_state: st.session_state.pack_order_man = ""
         if 'rider_ord_man' in st.session_state: st.session_state.rider_ord_man = ""
         if 'pack_prod_man' in st.session_state: st.session_state.pack_prod_man = ""
         if 'loc_man' in st.session_state: st.session_state.loc_man = ""
         if 'rider_lp_input' in st.session_state: st.session_state.rider_lp_input = "" 
         
-        # Reset State Variables
         st.session_state.order_val = ""
         st.session_state.current_order_items = []
         st.session_state.photo_gallery = [] 
         st.session_state.rider_photo = None
         st.session_state.picking_phase = 'scan'
         st.session_state.temp_login_user = None
-        
-        # --- NEW: Clear Target Folder State to avoid stale data ---
         st.session_state.target_rider_folder_id = None
         st.session_state.target_rider_folder_name = ""
         
-        # Reset Helpers
         st.session_state.prod_val = ""
         st.session_state.loc_val = ""
         st.session_state.prod_display_name = ""
         st.session_state.pick_qty = 1 
         st.session_state.cam_counter += 1
-        
         st.session_state.need_reset = False
 
 def logout_user():
-    st.session_state.current_user_name = ""
-    st.session_state.current_user_id = ""
-    trigger_reset()
-    st.rerun()
+    st.session_state.current_user_name = ""; st.session_state.current_user_id = ""
+    trigger_reset(); st.rerun()
+
+# --- CALLBACK FUNCTION (FIX FOR BUTTON) ---
+def go_to_pack_phase():
+    st.session_state.picking_phase = 'pack'
 
 # --- UI SETUP ---
 st.set_page_config(page_title="Smart Picking System", page_icon="📦")
@@ -398,30 +356,26 @@ else:
                             except: full_name = "Error Name"
                             
                             st.session_state.prod_display_name = full_name
-                            # ดึง Location จาก Excel เพื่อบันทึกเลย (ไม่ต้องสแกนซ้ำ)
                             target_loc_str = f"{str(row.get('Zone','')).strip()}-{str(row.get('Location','')).strip()}"
                         else:
                             st.error(f"❌ ไม่พบ Barcode: {st.session_state.prod_val}")
                     else:
                         st.warning("⚠️ Loading Data...")
                     
-                    # ถ้าเจอสินค้า -> บันทึกลงตะกร้าทันที!
                     if prod_found:
                         new_item = {
                             "Barcode": st.session_state.prod_val,
                             "Product Name": st.session_state.prod_display_name,
-                            "Location": target_loc_str, # ใช้ Location จาก Master Data
-                            "Qty": 1 # Fix จำนวนเป็น 1
+                            "Location": target_loc_str, 
+                            "Qty": 1
                         }
                         st.session_state.current_order_items.append(new_item)
                         st.toast(f"✅ เพิ่ม {full_name} แล้ว!", icon="🛒")
                         
-                        # Reset เพื่อสแกนชิ้นต่อไป
                         st.session_state.prod_val = ""
                         st.session_state.cam_counter += 1
                         st.rerun()
                     
-                    # ถ้าไม่เจอ หรือมี Error ให้แสดงปุ่ม Reset
                     if not prod_found:
                          if st.button("❌ สแกนใหม่"): 
                             st.session_state.prod_val = ""; st.session_state.cam_counter += 1; st.rerun()
@@ -430,8 +384,9 @@ else:
                     st.markdown("---")
                     st.markdown(f"### 🛒 ตะกร้าสินค้า ({len(st.session_state.current_order_items)} รายการ)")
                     st.dataframe(pd.DataFrame(st.session_state.current_order_items), use_container_width=True)
-                    if st.button("✅ ยืนยันรายการครบแล้ว (ไปถ่ายรูป)", type="primary", use_container_width=True):
-                        st.session_state.picking_phase = 'pack'; st.rerun()
+                    
+                    # --- FIX: ใช้ callback (on_click) เพื่อเปลี่ยนหน้าชัวร์ๆ ---
+                    st.button("✅ ยืนยันรายการครบแล้ว (ไปถ่ายรูป)", type="primary", use_container_width=True, on_click=go_to_pack_phase)
 
         elif st.session_state.picking_phase == 'pack':
             st.success(f"📦 Order: **{st.session_state.order_val}** (ยืนยันแล้ว)")
@@ -467,24 +422,16 @@ else:
                                 fid = get_target_folder_structure(srv, st.session_state.order_val, MAIN_FOLDER_ID)
                                 ts = get_thai_ts_filename()
                                 
-                                # 1. หาจำนวนรูปทั้งหมดก่อน
                                 total_imgs = len(st.session_state.photo_gallery)
-                                final_image_link_id = "" # เตรียมตัวแปรไว้เก็บ ID รูปสุดท้าย
+                                final_image_link_id = "" 
 
                                 for i, b in enumerate(st.session_state.photo_gallery):
-                                    # i เริ่มที่ 0, 1, 2...
                                     current_seq = i + 1 
-                                    
-                                    # ตั้งชื่อไฟล์ให้มีลำดับชัดเจน Img1, Img2, ...
                                     fn = f"{st.session_state.order_val}_PACKED_{ts}_Img{current_seq}.jpg"
                                     uid = upload_photo(srv, b, fn, fid)
-                                    
-                                    # 2. เช็คเงื่อนไข: "ถ้านี่คือรอบสุดท้าย ให้จำ ID นี้ไว้"
                                     if current_seq == total_imgs:
                                         final_image_link_id = uid
                                 
-                                # 3. บันทึกลง Sheet (ใช้ ID ที่เราดักจับไว้)
-                                # ถ้าไม่มีรูปเลย (กัน Error) ให้ใส่ขีด -
                                 if not final_image_link_id: final_image_link_id = "-"
 
                                 for item in st.session_state.current_order_items:
@@ -496,7 +443,7 @@ else:
                                         item['Location'], 
                                         item['Qty'], 
                                         st.session_state.current_user_id, 
-                                        final_image_link_id  # <--- ส่ง Link รูปสุดท้ายไปบันทึก
+                                        final_image_link_id
                                     )
                                     
                                 st.balloons()
@@ -510,16 +457,13 @@ else:
         st.title("🚚 Scan ปิดตู้")
         st.info("ถ่ายรูปเพิ่มเติมเพื่อส่งให้ Rider (จะบันทึกลง Folder เดิม)")
 
-        # --- [ADDED] 0. ระบุทะเบียนรถ ---
         st.markdown("#### 0. ระบุทะเบียนรถ (Optional)")
         rider_lp = st.text_input("🚛 ทะเบียนรถ", key="rider_lp_input", placeholder="กรอกทะเบียนรถที่มารับสินค้า...").strip()
-        # ----------------------------------
 
         st.markdown("#### 1. สแกน Order ที่จะส่ง")
         col_r1, col_r2 = st.columns([3, 1])
         man_rider_ord = col_r1.text_input("พิมพ์ Order ID", key="rider_ord_man").strip().upper()
         
-        # Camera Input
         scan_rider_ord = back_camera_input("แตะเพื่อสแกน Order", key=f"rider_cam_ord_{st.session_state.cam_counter}")
         
         current_rider_order = ""
@@ -558,14 +502,12 @@ else:
                             srv = authenticate_drive()
                             ts = get_thai_ts_filename()
                             
-                            # เตรียมชื่อไฟล์ (ใส่ทะเบียนรถถ้ามี)
                             rider_lp_val = rider_lp if rider_lp else "NoPlate"
                             lp_clean = rider_lp_val.replace(" ", "_")
                             fn = f"RIDER_{st.session_state.order_val}_{lp_clean}_{ts}.jpg"
                             
                             uid = upload_photo(srv, rider_img_input, fn, st.session_state.target_rider_folder_id)
                             
-                            # ส่งทะเบียนรถไปบันทึกด้วย
                             save_rider_log(
                                 st.session_state.current_user_name, 
                                 st.session_state.order_val, 
