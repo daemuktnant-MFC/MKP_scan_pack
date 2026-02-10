@@ -238,6 +238,9 @@ def check_and_execute_reset():
         # Reset Processing Flags
         st.session_state.processing_pack = False
         st.session_state.processing_rider = False
+        
+        # [แก้ไข: เพิ่มการ Reset ตัวแปรนี้]
+        st.session_state.rider_scanned_orders = []
 
 def logout_user():
     st.session_state.current_user_name = ""; st.session_state.current_user_id = ""
@@ -262,6 +265,9 @@ def init_session_state():
     # Flags for processing status
     if 'processing_pack' not in st.session_state: st.session_state.processing_pack = False
     if 'processing_rider' not in st.session_state: st.session_state.processing_rider = False
+
+    # [แก้ไข: เพิ่มการประกาศตัวแปรนี้]
+    if 'rider_scanned_orders' not in st.session_state: st.session_state.rider_scanned_orders = []
 
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
@@ -470,7 +476,7 @@ else:
                                         final_image_link_id
                                     )
                                     
-                                # [NEW] Big Green Checkmark
+                                # Big Green Checkmark
                                 st.markdown(
                                     """
                                     <div style="text-align: center;">
