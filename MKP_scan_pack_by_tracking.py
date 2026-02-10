@@ -47,15 +47,11 @@ USER_SHEET_NAME = 'User'
 
 # --- SOUND HELPER (เล่นเสียง) ---
 def play_sound(status='success'):
-    # URL เสียง (ใช้ Link กลางที่เข้าถึงได้ง่าย)
-    # Success: เสียงติ๊ดสั้นๆ
-    # Error: เสียง Error ตื๊ดด
     if status == 'success':
         sound_url = "https://www.soundjay.com/buttons/sounds/button-16.mp3"
     else:
         sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
-        
-    # Inject HTML Audio Player (Autoplay)
+    
     st.markdown(f"""
         <audio autoplay>
             <source src="{sound_url}" type="audio/mp3">
@@ -122,8 +118,8 @@ def load_sheet_data(sheet_name=0):
     except Exception as e:
         return pd.DataFrame()
 
-# [NEW] Load Rider History for Duplicate Check
-@st.cache_data(ttl=30) # Cache 30 วินาที เพื่อไม่ให้โหลดบ่อยเกินไป
+# Load Rider History for Duplicate Check
+@st.cache_data(ttl=30)
 def load_rider_history():
     try:
         creds = get_credentials()
@@ -132,12 +128,9 @@ def load_rider_history():
         sh = gc.open_by_key(SHEET_ID)
         try:
             worksheet = sh.worksheet(RIDER_SHEET_NAME)
-            # ดึงเฉพาะคอลัมน์ Order ID (สมมติว่าอยู่ Col 3 คือ Index 2)
-            # เพื่อความชัวร์ ดึงทั้งหมดแล้วหาชื่อเอา
             records = worksheet.get_all_records()
             if records:
                 df = pd.DataFrame(records)
-                # หาคอลัมน์ที่เป็น Order ID
                 target_col = None
                 for col in df.columns:
                     if "order" in col.lower() and "id" in col.lower():
@@ -146,7 +139,7 @@ def load_rider_history():
                 if target_col:
                     return df[target_col].astype(str).str.strip().str.upper().tolist()
         except:
-            pass # ถ้ายังไม่มี Sheet นี้ ก็ปล่อยผ่าน
+            pass 
         return []
     except:
         return []
@@ -177,11 +170,10 @@ def save_rider_log(picker_name, order_id, file_id, folder_name, license_plate="-
             worksheet.append_row(["Timestamp", "User Name", "Order ID", "License Plate", "Folder Name", "Rider Image Link"])
         timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
         worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, image_link])
-        # [NEW] Clear cache after save to update duplicate list immediately
         load_rider_history.clear() 
     except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
 
-# --- FOLDER STRUCTURE LOGIC ---
+# --- FOLDER STRUCTURE LOGIC (PACKING) ---
 def get_target_folder_structure(service, order_id, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
@@ -207,11 +199,15 @@ def get_target_folder_structure(service, order_id, main_parent_id):
     order_folder = service.files().create(body=meta_order, fields='id').execute()
     return order_folder.get('id')
 
-# [NEW] Function to get or create a DAILY Rider Folder
+# --- [MODIFIED] FOLDER STRUCTURE LOGIC (RIDER) ---
 def get_rider_daily_folder(service, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
+    year_str = now.strftime("%Y")
+    month_str = now.strftime("%m")
     date_str = now.strftime("%d-%m-%Y")
-    folder_name = f"Rider_Uploads_{date_str}"
+    
+    # ชื่อ Folder สุดท้าย: Rider_10-02-2026
+    folder_name = f"Rider_{date_str}"
 
     def _get_or_create(parent_id, name):
         q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
@@ -222,7 +218,16 @@ def get_rider_daily_folder(service, main_parent_id):
         folder = service.files().create(body=meta, fields='id').execute()
         return folder.get('id')
     
-    return _get_or_create(main_parent_id, folder_name), folder_name
+    # Step 1: Year (YYYY)
+    year_id = _get_or_create(main_parent_id, year_str)
+    
+    # Step 2: Month (MM)
+    month_id = _get_or_create(year_id, month_str)
+    
+    # Step 3: Day/Rider Folder (Rider_DD-MM-YYYY)
+    final_id = _get_or_create(month_id, folder_name)
+    
+    return final_id, folder_name
 
 def upload_photo(service, file_obj, filename, folder_id):
     try:
@@ -273,7 +278,6 @@ def check_and_execute_reset():
         
         # Reset Rider List & Input Helper
         st.session_state.rider_scanned_orders = []
-        # Trick: Increment this counter to change widget key, thus clearing it
         st.session_state.rider_input_reset_key += 1 
 
 def logout_user():
@@ -300,9 +304,7 @@ def init_session_state():
     if 'processing_rider' not in st.session_state: st.session_state.processing_rider = False
     if 'rider_scanned_orders' not in st.session_state: st.session_state.rider_scanned_orders = []
     
-    # [NEW] Key for resetting rider input text
     if 'rider_input_reset_key' not in st.session_state: st.session_state.rider_input_reset_key = 0
-    # [NEW] Status Message for Sound & Alerts
     if 'scan_status_msg' not in st.session_state: st.session_state.scan_status_msg = None
 
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
@@ -643,7 +645,7 @@ else:
                             rider_lp_val = rider_lp if rider_lp else "NoPlate"
                             lp_clean = rider_lp_val.replace(" ", "_")
                             
-                            # Create/Get Daily Folder
+                            # Create/Get Daily Folder (Hierarchy)
                             daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
 
                             img_pil_rider = Image.open(rider_img_input)
@@ -665,7 +667,7 @@ else:
                                     st.session_state.current_user_name, 
                                     target_ord_id, 
                                     uid, 
-                                    daily_fname, # Save Folder Name as Daily Folder
+                                    daily_fname, 
                                     rider_lp_val
                                 )
                             
