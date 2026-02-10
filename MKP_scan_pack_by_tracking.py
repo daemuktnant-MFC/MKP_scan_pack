@@ -159,38 +159,22 @@ def get_target_folder_structure(service, order_id, main_parent_id):
     order_folder = service.files().create(body=meta_order, fields='id').execute()
     return order_folder.get('id')
 
-def find_existing_order_folder(service, order_id, main_parent_id):
+# [NEW] Function to get or create a DAILY Rider Folder
+def get_rider_daily_folder(service, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
-    year_str = now.strftime("%Y")
-    month_str = now.strftime("%m")
     date_str = now.strftime("%d-%m-%Y")
+    folder_name = f"Rider_Uploads_{date_str}"
 
-    def _find_folder(parent_id, name):
+    def _get_or_create(parent_id, name):
         q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         res = service.files().list(q=q, fields="files(id)").execute()
         files = res.get('files', [])
-        return files[0]['id'] if files else None
-
-    year_id = _find_folder(main_parent_id, year_str)
-    if not year_id: return None, "ไม่พบ Folder ปีปัจจุบัน"
-    month_id = _find_folder(year_id, month_str)
-    if not month_id: return None, "ไม่พบ Folder เดือนปัจจุบัน"
-    date_id = _find_folder(month_id, date_str)
-    if not date_id: return None, "ไม่พบ Folder วันที่ของวันนี้"
+        if files: return files[0]['id']
+        meta = {'name': name, 'parents': [parent_id], 'mimeType': 'application/vnd.google-apps.folder'}
+        folder = service.files().create(body=meta, fields='id').execute()
+        return folder.get('id')
     
-    q_order = f"'{date_id}' in parents and name contains '{order_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    res_order = service.files().list(q=q_order, fields="files(id, name)", orderBy="createdTime desc").execute()
-    files_order = res_order.get('files', [])
-    
-    target_prefix = f"{order_id}_"
-    found_folder = None
-    for f in files_order:
-        if f['name'].startswith(target_prefix):
-            found_folder = f
-            break
-            
-    if found_folder: return found_folder['id'], found_folder['name']
-    else: return None, f"ไม่พบ Folder ของ Order: {order_id} ในวันนี้"
+    return _get_or_create(main_parent_id, folder_name), folder_name
 
 def upload_photo(service, file_obj, filename, folder_id):
     try:
@@ -213,12 +197,12 @@ def trigger_reset():
 
 def check_and_execute_reset():
     if st.session_state.get('need_reset'):
+        # Reset Logic for Mode 1
         if 'pack_order_man' in st.session_state: st.session_state.pack_order_man = ""
-        if 'rider_ord_man' in st.session_state: st.session_state.rider_ord_man = ""
         if 'pack_prod_man' in st.session_state: st.session_state.pack_prod_man = ""
         if 'loc_man' in st.session_state: st.session_state.loc_man = ""
-        if 'rider_lp_input' in st.session_state: st.session_state.rider_lp_input = "" 
         
+        # Reset State Variables
         st.session_state.order_val = ""
         st.session_state.current_order_items = []
         st.session_state.photo_gallery = [] 
@@ -239,8 +223,10 @@ def check_and_execute_reset():
         st.session_state.processing_pack = False
         st.session_state.processing_rider = False
         
-        # Reset Rider List
+        # Reset Rider List & Input Helper
         st.session_state.rider_scanned_orders = []
+        # Trick: Increment this counter to change widget key, thus clearing it
+        st.session_state.rider_input_reset_key += 1 
 
 def logout_user():
     st.session_state.current_user_name = ""; st.session_state.current_user_id = ""
@@ -265,10 +251,13 @@ def init_session_state():
     if 'processing_pack' not in st.session_state: st.session_state.processing_pack = False
     if 'processing_rider' not in st.session_state: st.session_state.processing_rider = False
     if 'rider_scanned_orders' not in st.session_state: st.session_state.rider_scanned_orders = []
+    
+    # [NEW] Key for resetting rider input text
+    if 'rider_input_reset_key' not in st.session_state: st.session_state.rider_input_reset_key = 0
 
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
-            'target_rider_folder_id', 'target_rider_folder_name', 'rider_lp_val', 'rider_ord_man'] # Added rider_ord_man for manual input key
+            'target_rider_folder_id', 'target_rider_folder_name', 'rider_lp_val']
     for k in keys:
         if k not in st.session_state:
             if k == 'pick_qty': st.session_state[k] = 1
@@ -364,6 +353,7 @@ else:
                         res_p = decode(Image.open(scan_prod))
                         if res_p: st.session_state.prod_val = res_p[0].data.decode("utf-8"); st.rerun()
                 else:
+                    # AUTO ADD LOGIC
                     target_loc_str = "Unknown"
                     prod_found = False
                     
@@ -423,6 +413,7 @@ else:
                 if pack_img:
                     img_pil = Image.open(pack_img)
                     if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
+                    # [HIGH QUALITY]
                     buf = io.BytesIO(); img_pil.save(buf, format='JPEG', quality=95, optimize=True)
                     st.session_state.photo_gallery.append(buf.getvalue())
                     st.session_state.cam_counter += 1; st.rerun()
@@ -484,7 +475,7 @@ else:
     # ================= MODE 2: RIDER (MULTI-ORDER) =================
     elif mode == "🚚 Scan ปิดตู้":
         st.title("🚚 Scan ปิดตู้ (Multi-Order)")
-        st.info("1. สแกน Order ที่จะส่งทั้งหมดลงตะกร้า\n2. ถ่ายรูปยืนยัน (รูปเดียวใช้กับทุก Order)")
+        st.info("1. สแกน Order ที่จะส่งทั้งหมดลงตะกร้า\n2. ถ่ายรูปยืนยัน (รูปเดียวใช้กับทุก Order)\n*ระบบจะบันทึกลง Folder: Rider_Uploads_วันนี้ โดยอัตโนมัติ*")
 
         # 0. ระบุทะเบียนรถ
         st.markdown("#### 0. ระบุทะเบียนรถ (Optional)")
@@ -493,20 +484,20 @@ else:
         # 1. ส่วนสแกน Order
         st.markdown("#### 1. สแกน Order")
         
-        # [FIX] Separate Columns & Manual Input Handling
         col_r1, col_r2 = st.columns([3, 1])
-        man_rider_ord = col_r1.text_input("พิมพ์ Order ID", key="rider_ord_man").strip().upper()
+        # [FIX] ใช้ Key ที่เปลี่ยนค่าได้ เพื่อบังคับล้างค่า Input
+        dynamic_key = f"rider_ord_man_{st.session_state.rider_input_reset_key}"
+        man_rider_ord = col_r1.text_input("พิมพ์ Order ID", key=dynamic_key).strip().upper()
         
-        # [FIX] Submit button for manual input
         with col_r2:
-            st.write("") # Spacer
+            st.write("") 
             st.write("")
             manual_submit = st.button("ตกลง", use_container_width=True)
 
         scan_rider_ord = back_camera_input("แตะเพื่อสแกน Order", key=f"rider_cam_ord_{st.session_state.cam_counter}")
         
         current_rider_order = ""
-        # Priority: Manual Submit > Manual Input (Auto) > Camera
+        # Priority: Manual Submit > Camera
         if manual_submit and man_rider_ord:
              current_rider_order = man_rider_ord
         elif scan_rider_ord:
@@ -517,31 +508,21 @@ else:
             existing_ids = [o['id'] for o in st.session_state.rider_scanned_orders]
             if current_rider_order in existing_ids:
                 st.toast(f"⚠️ {current_rider_order} มีในรายการแล้ว", icon="🔄")
-                # [FIX] Clear Inputs & Reset Camera
-                st.session_state["rider_ord_man"] = ""
+                # Clear Input via Key Reset
+                st.session_state.rider_input_reset_key += 1
                 st.session_state.cam_counter += 1
                 st.rerun()
             else:
-                with st.spinner(f"🔍 ตรวจสอบ Folder: {current_rider_order}..."):
-                    srv = authenticate_drive()
-                    if srv:
-                        folder_id, folder_name = find_existing_order_folder(srv, current_rider_order, MAIN_FOLDER_ID)
-                        if folder_id:
-                            st.session_state.rider_scanned_orders.append({
-                                'id': current_rider_order,
-                                'folder_id': folder_id,
-                                'folder_name': folder_name
-                            })
-                            st.success(f"✅ เพิ่ม: {current_rider_order}")
-                            # [FIX] Clear Inputs to prevent loop
-                            st.session_state["rider_ord_man"] = ""
-                            st.session_state.cam_counter += 1
-                            st.rerun()
-                        else: 
-                            st.error(f"❌ ไม่พบ Folder: {current_rider_order}")
-                            st.session_state["rider_ord_man"] = ""
-                            st.session_state.cam_counter += 1 
-                            # Don't rerun immediately on error to let user see msg, or use time.sleep
+                # [MODIFIED] ไม่ต้องค้นหา Folder แล้ว รับค่าเลย
+                st.session_state.rider_scanned_orders.append({
+                    'id': current_rider_order,
+                    'folder_id': None, # ไม่ใช้แล้ว
+                    'folder_name': 'Daily_Upload' # Placeholder
+                })
+                st.success(f"✅ เพิ่ม: {current_rider_order}")
+                st.session_state.rider_input_reset_key += 1
+                st.session_state.cam_counter += 1
+                st.rerun()
 
         # แสดงรายการ Order ที่สแกนแล้ว
         if st.session_state.rider_scanned_orders:
@@ -550,7 +531,7 @@ else:
             for idx, order in enumerate(st.session_state.rider_scanned_orders):
                 c1, c2, c3 = st.columns([1, 4, 1])
                 c1.write(f"{idx+1}.")
-                c2.write(f"**{order['id']}** ({order['folder_name']})")
+                c2.write(f"**{order['id']}**")
                 if c3.button("ลบ", key=f"del_r_{idx}"):
                     st.session_state.rider_scanned_orders.pop(idx)
                     st.rerun()
@@ -586,6 +567,9 @@ else:
                             rider_lp_val = rider_lp if rider_lp else "NoPlate"
                             lp_clean = rider_lp_val.replace(" ", "_")
                             
+                            # [NEW] Create/Get Daily Folder
+                            daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
+
                             img_pil_rider = Image.open(rider_img_input)
                             if img_pil_rider.mode in ("RGBA", "P"): img_pil_rider = img_pil_rider.convert("RGB")
                             
@@ -594,18 +578,18 @@ else:
                                 img_pil_rider.save(buf_rider, format='JPEG', quality=95, optimize=True)
                                 
                                 target_ord_id = order['id']
-                                target_fid = order['folder_id']
-                                target_fname = order['folder_name']
                                 
+                                # File Name includes Tracking ID
                                 fn = f"RIDER_{target_ord_id}_{lp_clean}_{ts}.jpg"
                                 
-                                uid = upload_photo(srv, buf_rider.getvalue(), fn, target_fid)
+                                # Upload to DAILY folder
+                                uid = upload_photo(srv, buf_rider.getvalue(), fn, daily_fid)
                                 
                                 save_rider_log(
                                     st.session_state.current_user_name, 
                                     target_ord_id, 
                                     uid, 
-                                    target_fname,
+                                    daily_fname, # Save Folder Name as Daily Folder
                                     rider_lp_val
                                 )
                             
