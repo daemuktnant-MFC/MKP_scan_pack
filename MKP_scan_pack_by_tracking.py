@@ -120,21 +120,25 @@ def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
 
-# --- RIDER LOG ---
-def save_rider_log(picker_name, order_id, file_id, folder_name, license_plate="-"):
+# --- RIDER LOG (UPDATED) ---
+def save_rider_log(picker_name, order_id, folder_name, license_plate, link_inside, link_seal):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
         try: 
             worksheet = sh.worksheet(RIDER_SHEET_NAME)
         except: 
             worksheet = sh.add_worksheet(title=RIDER_SHEET_NAME, rows="1000", cols="10")
-            worksheet.append_row(["Timestamp", "User Name", "Order ID", "License Plate", "Folder Name", "Rider Image Link"])
-        timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
-        worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, image_link])
+            worksheet.append_row(["Timestamp", "User Name", "Order ID", "License Plate", "Folder Name", "Inside Img", "Seal Img"])
+        
+        timestamp = get_thai_time()
+        l_inside = f"https://drive.google.com/open?id={link_inside}"
+        l_seal = f"https://drive.google.com/open?id={link_seal}"
+        
+        worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, l_inside, l_seal])
     except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
 
-# --- FOLDER STRUCTURE LOGIC ---
-def get_target_folder_structure(service, order_id, main_parent_id):
+# --- FOLDER LOGIC (NEW: BY LICENSE PLATE) ---
+def create_license_plate_folder(service, license_plate, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
     month_str = now.strftime("%m")
@@ -149,48 +153,44 @@ def get_target_folder_structure(service, order_id, main_parent_id):
         folder = service.files().create(body=meta, fields='id').execute()
         return folder.get('id')
 
+    # Path: Year / Month / Date / LicensePlate_Time
     year_id = _get_or_create(main_parent_id, year_str)
     month_id = _get_or_create(year_id, month_str)
     date_id = _get_or_create(month_id, date_str)
 
+    # Folder ปลายทางชื่อ: ทะเบียนรถ_เวลา (เช่น 8กข1234_14-30)
+    time_suffix = now.strftime("%H-%M")
+    lp_clean = license_plate.replace(" ", "")
+    target_folder_name = f"{lp_clean}_{time_suffix}"
+    
+    meta_final = {'name': target_folder_name, 'parents': [date_id], 'mimeType': 'application/vnd.google-apps.folder'}
+    final_folder = service.files().create(body=meta_final, fields='id, name').execute()
+    
+    return final_folder.get('id'), final_folder.get('name')
+
+# --- FOLDER LOGIC (OLD: FOR PACKING MODE) ---
+def get_target_folder_structure(service, order_id, main_parent_id):
+    # (ใช้สำหรับ Mode Pack สินค้าเหมือนเดิม)
+    now = datetime.utcnow() + timedelta(hours=7)
+    year_str = now.strftime("%Y")
+    month_str = now.strftime("%m")
+    date_str = now.strftime("%d-%m-%Y")
+    def _get_or_create(parent_id, name):
+        q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        res = service.files().list(q=q, fields="files(id)").execute()
+        files = res.get('files', [])
+        if files: return files[0]['id']
+        meta = {'name': name, 'parents': [parent_id], 'mimeType': 'application/vnd.google-apps.folder'}
+        folder = service.files().create(body=meta, fields='id').execute()
+        return folder.get('id')
+    year_id = _get_or_create(main_parent_id, year_str)
+    month_id = _get_or_create(year_id, month_str)
+    date_id = _get_or_create(month_id, date_str)
     time_suffix = now.strftime("%H-%M")
     order_folder_name = f"{order_id}_{time_suffix}"
     meta_order = {'name': order_folder_name, 'parents': [date_id], 'mimeType': 'application/vnd.google-apps.folder'}
     order_folder = service.files().create(body=meta_order, fields='id').execute()
     return order_folder.get('id')
-
-def find_existing_order_folder(service, order_id, main_parent_id):
-    now = datetime.utcnow() + timedelta(hours=7)
-    year_str = now.strftime("%Y")
-    month_str = now.strftime("%m")
-    date_str = now.strftime("%d-%m-%Y")
-
-    def _find_folder(parent_id, name):
-        q = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        res = service.files().list(q=q, fields="files(id)").execute()
-        files = res.get('files', [])
-        return files[0]['id'] if files else None
-
-    year_id = _find_folder(main_parent_id, year_str)
-    if not year_id: return None, "ไม่พบ Folder ปีปัจจุบัน"
-    month_id = _find_folder(year_id, month_str)
-    if not month_id: return None, "ไม่พบ Folder เดือนปัจจุบัน"
-    date_id = _find_folder(month_id, date_str)
-    if not date_id: return None, "ไม่พบ Folder วันที่ของวันนี้"
-    
-    q_order = f"'{date_id}' in parents and name contains '{order_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    res_order = service.files().list(q=q_order, fields="files(id, name)", orderBy="createdTime desc").execute()
-    files_order = res_order.get('files', [])
-    
-    target_prefix = f"{order_id}_"
-    found_folder = None
-    for f in files_order:
-        if f['name'].startswith(target_prefix):
-            found_folder = f
-            break
-            
-    if found_folder: return found_folder['id'], found_folder['name']
-    else: return None, f"ไม่พบ Folder ของ Order: {order_id} ในวันนี้"
 
 def upload_photo(service, file_obj, filename, folder_id):
     try:
@@ -213,21 +213,20 @@ def trigger_reset():
 
 def check_and_execute_reset():
     if st.session_state.get('need_reset'):
+        # Clear Inputs
         if 'pack_order_man' in st.session_state: st.session_state.pack_order_man = ""
         if 'rider_ord_man' in st.session_state: st.session_state.rider_ord_man = ""
         if 'pack_prod_man' in st.session_state: st.session_state.pack_prod_man = ""
         if 'loc_man' in st.session_state: st.session_state.loc_man = ""
         if 'rider_lp_input' in st.session_state: st.session_state.rider_lp_input = "" 
         
+        # Clear Variables
         st.session_state.order_val = ""
         st.session_state.current_order_items = []
         st.session_state.photo_gallery = [] 
         st.session_state.rider_photo = None
         st.session_state.picking_phase = 'scan'
         st.session_state.temp_login_user = None
-        st.session_state.target_rider_folder_id = None
-        st.session_state.target_rider_folder_name = ""
-        
         st.session_state.prod_val = ""
         st.session_state.loc_val = ""
         st.session_state.prod_display_name = ""
@@ -239,21 +238,27 @@ def check_and_execute_reset():
         st.session_state.processing_pack = False
         st.session_state.processing_rider = False
         
-        # [แก้ไข: เพิ่มการ Reset ตัวแปรนี้]
+        # Reset Rider Data
         st.session_state.rider_scanned_orders = []
+        st.session_state.rider_phase = 'scan_orders' 
+        st.session_state.rider_img_inside = None
+        st.session_state.rider_img_seal = None
 
 def logout_user():
     st.session_state.current_user_name = ""; st.session_state.current_user_id = ""
     trigger_reset(); st.rerun()
 
-# --- CALLBACKS FOR BUTTONS (PREVENT DOUBLE SUBMIT) ---
+# --- CALLBACKS ---
 def go_to_pack_phase():
     st.session_state.picking_phase = 'pack'
 
 def click_confirm_pack():
     st.session_state.processing_pack = True
 
-def click_confirm_rider():
+def click_start_photo_sequence():
+    st.session_state.rider_phase = 'photo_inside'
+
+def click_confirm_rider_upload():
     st.session_state.processing_rider = True
 
 # --- UI SETUP ---
@@ -261,17 +266,18 @@ st.set_page_config(page_title="Smart Picking System", page_icon="📦")
 
 def init_session_state():
     if 'need_reset' not in st.session_state: st.session_state.need_reset = False
-    
-    # Flags for processing status
     if 'processing_pack' not in st.session_state: st.session_state.processing_pack = False
     if 'processing_rider' not in st.session_state: st.session_state.processing_rider = False
 
-    # [แก้ไข: เพิ่มการประกาศตัวแปรนี้]
+    # [FIX] Rider Specific States (ต้องประกาศตัวแปรเหล่านี้)
     if 'rider_scanned_orders' not in st.session_state: st.session_state.rider_scanned_orders = []
+    if 'rider_phase' not in st.session_state: st.session_state.rider_phase = 'scan_orders'
+    if 'rider_img_inside' not in st.session_state: st.session_state.rider_img_inside = None
+    if 'rider_img_seal' not in st.session_state: st.session_state.rider_img_seal = None
 
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
-            'target_rider_folder_id', 'target_rider_folder_name', 'rider_lp_val']
+            'rider_lp_val']
     for k in keys:
         if k not in st.session_state:
             if k == 'pick_qty': st.session_state[k] = 1
@@ -279,7 +285,7 @@ def init_session_state():
             elif k == 'photo_gallery': st.session_state[k] = []
             elif k == 'current_order_items': st.session_state[k] = []
             elif k == 'picking_phase': st.session_state[k] = 'scan'
-            else: st.session_state[k] = None if k in ['temp_login_user', 'target_rider_folder_id'] else ""
+            else: st.session_state[k] = None
 
 init_session_state()
 check_and_execute_reset()
@@ -378,7 +384,6 @@ else:
                             row = match.iloc[0]
                             try: brand = str(row.iloc[3]); variant = str(row.iloc[5]); full_name = f"{brand} {variant}"
                             except: full_name = "Error Name"
-                            
                             st.session_state.prod_display_name = full_name
                             target_loc_str = f"{str(row.get('Zone','')).strip()}-{str(row.get('Location','')).strip()}"
                         else:
@@ -395,10 +400,7 @@ else:
                         }
                         st.session_state.current_order_items.append(new_item)
                         st.toast(f"✅ เพิ่ม {full_name} แล้ว!", icon="🛒")
-                        
-                        st.session_state.prod_val = ""
-                        st.session_state.cam_counter += 1
-                        st.rerun()
+                        st.session_state.prod_val = ""; st.session_state.cam_counter += 1; st.rerun()
                     
                     if not prod_found:
                          if st.button("❌ สแกนใหม่"): 
@@ -438,14 +440,11 @@ else:
                 if st.button("⬅️ กลับไปแก้ไขรายการ"): st.session_state.picking_phase = 'scan'; st.session_state.photo_gallery = []; st.rerun()
             with col_b2:
                 if len(st.session_state.photo_gallery) > 0:
-                    
-                    # Button Logic: Prevent Double Click
                     if not st.session_state.processing_pack:
                         st.button("☁️ ยืนยัน Upload ทั้งหมด", type="primary", use_container_width=True, on_click=click_confirm_pack)
                     else:
                         st.info("⏳ กำลังอัปโหลด... กรุณารอสักครู่ (ห้ามปิดหน้าจอ)")
                     
-                    # Processing Logic
                     if st.session_state.processing_pack:
                         with st.spinner("🚀 กำลังเชื่อมต่อ Google Drive..."):
                             srv = authenticate_drive()
@@ -454,38 +453,15 @@ else:
                                 ts = get_thai_ts_filename()
                                 total_imgs = len(st.session_state.photo_gallery)
                                 final_image_link_id = "" 
-
                                 for i, b in enumerate(st.session_state.photo_gallery):
                                     current_seq = i + 1 
                                     fn = f"{st.session_state.order_val}_PACKED_{ts}_Img{current_seq}.jpg"
                                     uid = upload_photo(srv, b, fn, fid)
-                                    if current_seq == total_imgs:
-                                        final_image_link_id = uid
-                                
+                                    if current_seq == total_imgs: final_image_link_id = uid
                                 if not final_image_link_id: final_image_link_id = "-"
-
                                 for item in st.session_state.current_order_items:
-                                    save_log_to_sheet(
-                                        st.session_state.current_user_name, 
-                                        st.session_state.order_val, 
-                                        item['Barcode'], 
-                                        item['Product Name'], 
-                                        item['Location'], 
-                                        item['Qty'], 
-                                        st.session_state.current_user_id, 
-                                        final_image_link_id
-                                    )
-                                    
-                                # Big Green Checkmark
-                                st.markdown(
-                                    """
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 100px;">✅</div>
-                                        <h2 style="color: #28a745; margin-top: -20px;">บันทึกสำเร็จ!</h2>
-                                    </div>
-                                    """, 
-                                    unsafe_allow_html=True
-                                )
+                                    save_log_to_sheet(st.session_state.current_user_name, st.session_state.order_val, item['Barcode'], item['Product Name'], item['Location'], item['Qty'], st.session_state.current_user_id, final_image_link_id)
+                                st.markdown("""<div style="text-align: center;"><div style="font-size: 100px;">✅</div><h2 style="color: #28a745; margin-top: -20px;">บันทึกสำเร็จ!</h2></div>""", unsafe_allow_html=True)
                                 time.sleep(1.5)
                                 trigger_reset()
                                 st.rerun()
