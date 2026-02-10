@@ -45,6 +45,23 @@ LOG_SHEET_NAME = 'Logs'
 RIDER_SHEET_NAME = 'Rider_Logs'
 USER_SHEET_NAME = 'User'
 
+# --- SOUND HELPER (เล่นเสียง) ---
+def play_sound(status='success'):
+    # URL เสียง (ใช้ Link กลางที่เข้าถึงได้ง่าย)
+    # Success: เสียงติ๊ดสั้นๆ
+    # Error: เสียง Error ตื๊ดด
+    if status == 'success':
+        sound_url = "https://www.soundjay.com/buttons/sounds/button-16.mp3"
+    else:
+        sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
+        
+    # Inject HTML Audio Player (Autoplay)
+    st.markdown(f"""
+        <audio autoplay>
+            <source src="{sound_url}" type="audio/mp3">
+        </audio>
+        """, unsafe_allow_html=True)
+
 # --- AUTHENTICATION ---
 def get_credentials():
     try:
@@ -105,6 +122,35 @@ def load_sheet_data(sheet_name=0):
     except Exception as e:
         return pd.DataFrame()
 
+# [NEW] Load Rider History for Duplicate Check
+@st.cache_data(ttl=30) # Cache 30 วินาที เพื่อไม่ให้โหลดบ่อยเกินไป
+def load_rider_history():
+    try:
+        creds = get_credentials()
+        if not creds: return []
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(SHEET_ID)
+        try:
+            worksheet = sh.worksheet(RIDER_SHEET_NAME)
+            # ดึงเฉพาะคอลัมน์ Order ID (สมมติว่าอยู่ Col 3 คือ Index 2)
+            # เพื่อความชัวร์ ดึงทั้งหมดแล้วหาชื่อเอา
+            records = worksheet.get_all_records()
+            if records:
+                df = pd.DataFrame(records)
+                # หาคอลัมน์ที่เป็น Order ID
+                target_col = None
+                for col in df.columns:
+                    if "order" in col.lower() and "id" in col.lower():
+                        target_col = col
+                        break
+                if target_col:
+                    return df[target_col].astype(str).str.strip().str.upper().tolist()
+        except:
+            pass # ถ้ายังไม่มี Sheet นี้ ก็ปล่อยผ่าน
+        return []
+    except:
+        return []
+
 # --- TIME HELPER ---
 def get_thai_time(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
 def get_thai_date_str(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%d-%m-%Y")
@@ -131,6 +177,8 @@ def save_rider_log(picker_name, order_id, file_id, folder_name, license_plate="-
             worksheet.append_row(["Timestamp", "User Name", "Order ID", "License Plate", "Folder Name", "Rider Image Link"])
         timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
         worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, image_link])
+        # [NEW] Clear cache after save to update duplicate list immediately
+        load_rider_history.clear() 
     except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
 
 # --- FOLDER STRUCTURE LOGIC ---
@@ -254,6 +302,8 @@ def init_session_state():
     
     # [NEW] Key for resetting rider input text
     if 'rider_input_reset_key' not in st.session_state: st.session_state.rider_input_reset_key = 0
+    # [NEW] Status Message for Sound & Alerts
+    if 'scan_status_msg' not in st.session_state: st.session_state.scan_status_msg = None
 
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
@@ -481,6 +531,20 @@ else:
         st.markdown("#### 0. ระบุทะเบียนรถ (Optional)")
         rider_lp = st.text_input("🚛 ทะเบียนรถ", key="rider_lp_input", placeholder="กรอกทะเบียนรถที่มารับสินค้า...").strip()
 
+        # [STATUS MESSAGE & AUDIO PLAYBACK]
+        if st.session_state.scan_status_msg:
+            # Show Message
+            if st.session_state.scan_status_msg['type'] == 'error':
+                st.error(st.session_state.scan_status_msg['msg'])
+                play_sound('error')
+            else:
+                st.success(st.session_state.scan_status_msg['msg'])
+                play_sound('success')
+            
+            # Reset message after showing once
+            st.session_state.scan_status_msg = None
+
+
         # 1. ส่วนสแกน Order
         st.markdown("#### 1. สแกน Order")
         
@@ -505,24 +569,36 @@ else:
             if res: current_rider_order = res[0].data.decode("utf-8").upper()
 
         if current_rider_order:
+            # 1. Check Duplicate in CURRENT SESSION
             existing_ids = [o['id'] for o in st.session_state.rider_scanned_orders]
+            
             if current_rider_order in existing_ids:
-                st.toast(f"⚠️ {current_rider_order} มีในรายการแล้ว", icon="🔄")
-                # Clear Input via Key Reset
+                st.session_state.scan_status_msg = {'type': 'error', 'msg': f"⚠️ {current_rider_order} มีในตะกร้าแล้ว!"}
                 st.session_state.rider_input_reset_key += 1
                 st.session_state.cam_counter += 1
                 st.rerun()
+            
             else:
-                # [MODIFIED] ไม่ต้องค้นหา Folder แล้ว รับค่าเลย
-                st.session_state.rider_scanned_orders.append({
-                    'id': current_rider_order,
-                    'folder_id': None, # ไม่ใช้แล้ว
-                    'folder_name': 'Daily_Upload' # Placeholder
-                })
-                st.success(f"✅ เพิ่ม: {current_rider_order}")
-                st.session_state.rider_input_reset_key += 1
-                st.session_state.cam_counter += 1
-                st.rerun()
+                # 2. Check Duplicate in GOOGLE SHEET (Historical)
+                history_list = load_rider_history()
+                
+                if current_rider_order in history_list:
+                    st.session_state.scan_status_msg = {'type': 'error', 'msg': f"⛔ {current_rider_order} เคยบันทึกไปแล้วใน Sheet!"}
+                    st.session_state.rider_input_reset_key += 1
+                    st.session_state.cam_counter += 1
+                    st.rerun()
+                
+                else:
+                    # ✅ Passed all checks
+                    st.session_state.rider_scanned_orders.append({
+                        'id': current_rider_order,
+                        'folder_id': None, 
+                        'folder_name': 'Daily_Upload'
+                    })
+                    st.session_state.scan_status_msg = {'type': 'success', 'msg': f"✅ เพิ่ม: {current_rider_order}"}
+                    st.session_state.rider_input_reset_key += 1
+                    st.session_state.cam_counter += 1
+                    st.rerun()
 
         # แสดงรายการ Order ที่สแกนแล้ว
         if st.session_state.rider_scanned_orders:
@@ -567,7 +643,7 @@ else:
                             rider_lp_val = rider_lp if rider_lp else "NoPlate"
                             lp_clean = rider_lp_val.replace(" ", "_")
                             
-                            # [NEW] Create/Get Daily Folder
+                            # Create/Get Daily Folder
                             daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
 
                             img_pil_rider = Image.open(rider_img_input)
