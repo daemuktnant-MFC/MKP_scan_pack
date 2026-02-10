@@ -199,7 +199,7 @@ def get_target_folder_structure(service, order_id, main_parent_id):
     order_folder = service.files().create(body=meta_order, fields='id').execute()
     return order_folder.get('id')
 
-# --- [MODIFIED] FOLDER STRUCTURE LOGIC (RIDER) ---
+# --- FOLDER STRUCTURE LOGIC (RIDER) ---
 def get_rider_daily_folder(service, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
@@ -645,24 +645,23 @@ else:
                             rider_lp_val = rider_lp if rider_lp else "NoPlate"
                             lp_clean = rider_lp_val.replace(" ", "_")
                             
-                            # Create/Get Daily Folder (Hierarchy)
-                            daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
-
+                            # [MODIFIED] Upload ONCE
+                            # 1. Create Buffer
                             img_pil_rider = Image.open(rider_img_input)
                             if img_pil_rider.mode in ("RGBA", "P"): img_pil_rider = img_pil_rider.convert("RGB")
+                            buf_rider = io.BytesIO()
+                            img_pil_rider.save(buf_rider, format='JPEG', quality=95, optimize=True)
                             
+                            # 2. Define Single Filename (Plate + Time)
+                            fn = f"{lp_clean}_{ts}.jpg"
+                            
+                            # 3. Get Folder & Upload
+                            daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
+                            uid = upload_photo(srv, buf_rider.getvalue(), fn, daily_fid)
+                            
+                            # 4. Loop to Save Logs (Using same UID)
                             for order in st.session_state.rider_scanned_orders:
-                                buf_rider = io.BytesIO()
-                                img_pil_rider.save(buf_rider, format='JPEG', quality=95, optimize=True)
-                                
                                 target_ord_id = order['id']
-                                
-                                # File Name includes Tracking ID
-                                fn = f"RIDER_{target_ord_id}_{lp_clean}_{ts}.jpg"
-                                
-                                # Upload to DAILY folder
-                                uid = upload_photo(srv, buf_rider.getvalue(), fn, daily_fid)
-                                
                                 save_rider_log(
                                     st.session_state.current_user_name, 
                                     target_ord_id, 
