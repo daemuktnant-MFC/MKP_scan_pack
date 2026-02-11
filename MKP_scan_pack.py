@@ -19,15 +19,14 @@ except ImportError:
     st.error("⚠️ ต้องเพิ่ม 'streamlit-back-camera-input' ใน requirements.txt")
     st.stop()
 
-# --- CSS HACK (คงเดิมตามขอ) ---
+# --- CSS HACK ---
 st.markdown(
     """
     <style>
-    /* ปรับขนาดตัวหนังสือ Header ตามระดับ */
-    h1 { font-size: 14px !important; }  /* หัวข้อใหญ่สุด (st.title) */
-    h2 { font-size: 12px !important; }  /* หัวข้อรอง (st.header) */
-    h3 { font-size: 10px !important; }  /* หัวข้อย่อย (st.subheader หรือ ###) */
-    h4 { font-size: 9px !important; }  /* หัวข้อเล็ก (####) */
+    h1 { font-size: 14px !important; } 
+    h2 { font-size: 12px !important; } 
+    h3 { font-size: 10px !important; } 
+    h4 { font-size: 9px !important; } 
     
     iframe[title="streamlit_back_camera_input.back_camera_input"] {
         min-height: 450px !important; 
@@ -44,10 +43,16 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (แยกไฟล์เก็บข้อมูล กับ ไฟล์ตรวจสอบ) ---
 MAIN_FOLDER_ID = '1sZQKOuw4YGazuy4euk4ns7nLr7Zie6cm'
-SHEET_ID = '1tZfX9I6Ntbo-Jf2_rcqBc2QYUrCCCSAx8K4YBkly92c'
-ORDER_DATA_SHEET_NAME = 'Order_Data' # [NEW] Sheet สำหรับตรวจสอบ
+
+# [UPDATED] 1. ไฟล์สำหรับบันทึก Log และ User (ไฟล์เดิม)
+LOG_SHEET_ID = '1tZfX9I6Ntbo-Jf2_rcqBc2QYUrCCCSAx8K4YBkly92c' 
+
+# [UPDATED] 2. ไฟล์สำหรับตรวจสอบ Order Data (ไฟล์ใหม่)
+ORDER_CHECK_SHEET_ID = '1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08' 
+
+ORDER_DATA_SHEET_NAME = 'Order_Data'
 LOG_SHEET_NAME = 'Logs'
 RIDER_SHEET_NAME = 'Rider_Logs'
 USER_SHEET_NAME = 'User'
@@ -98,16 +103,20 @@ def authenticate_drive():
         st.error(f"Error Drive: {e}")
         return None
 
-# --- GOOGLE SERVICES ---
+# --- GOOGLE SERVICES (UPDATED: รองรับหลายไฟล์) ---
 @st.cache_data(ttl=600)
-def load_sheet_data(sheet_name=0): 
+def load_sheet_data(sheet_name, spreadsheet_key): # [UPDATED] รับ Key ของไฟล์ที่จะโหลด
     try:
         creds = get_credentials()
         if not creds: return pd.DataFrame()
         gc = gspread.authorize(creds)
-        sh = gc.open_by_key(SHEET_ID)
+        
+        # เปิดไฟล์ตาม Key ที่ส่งมา
+        sh = gc.open_by_key(spreadsheet_key)
+        
         if isinstance(sheet_name, int): worksheet = sh.get_worksheet(sheet_name)
         else: worksheet = sh.worksheet(sheet_name)
+        
         rows = worksheet.get_all_values()
         if len(rows) > 1:
             headers = rows[0]; data = rows[1:]
@@ -116,7 +125,6 @@ def load_sheet_data(sheet_name=0):
             
             # Normalize column names
             for col in df.columns:
-                # แก้ให้รองรับชื่อ Tracking หรือ Order ID หรือ Barcode หลากหลายรูปแบบ
                 col_lower = col.lower()
                 if 'tracking' in col_lower or 'order' in col_lower and 'id' in col_lower: 
                     df.rename(columns={col: 'Tracking'}, inplace=True)
@@ -131,16 +139,17 @@ def load_sheet_data(sheet_name=0):
             return df
         return pd.DataFrame()
     except Exception as e:
+        # st.error(f"Load Error: {e}") # Uncomment to debug
         return pd.DataFrame()
 
-# Load Rider History for Duplicate Check
+# Load Rider History (ใช้ LOG_SHEET_ID)
 @st.cache_data(ttl=30)
 def load_rider_history():
     try:
         creds = get_credentials()
         if not creds: return []
         gc = gspread.authorize(creds)
-        sh = gc.open_by_key(SHEET_ID)
+        sh = gc.open_by_key(LOG_SHEET_ID) # [UPDATED]
         try:
             worksheet = sh.worksheet(RIDER_SHEET_NAME)
             records = worksheet.get_all_records()
@@ -165,19 +174,22 @@ def get_thai_date_str(): return (datetime.utcnow() + timedelta(hours=7)).strftim
 def get_thai_time_suffix(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%H-%M")
 def get_thai_ts_filename(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%Y%m%d_%H%M%S")
 
+# --- SAVE LOGS (ใช้ LOG_SHEET_ID) ---
 def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, file_id):
     try:
-        creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
+        creds = get_credentials(); gc = gspread.authorize(creds)
+        sh = gc.open_by_key(LOG_SHEET_ID) # [UPDATED]
         try: worksheet = sh.worksheet(LOG_SHEET_NAME)
         except: worksheet = sh.add_worksheet(title=LOG_SHEET_NAME, rows="1000", cols="20"); worksheet.append_row(["Timestamp", "Picker Name", "Order ID", "Barcode", "Product Name", "Location", "Pick Qty", "User", "Image Link (Col I)"])
         timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
 
-# --- RIDER LOG (UPDATED: Support Multiple Images) ---
+# --- SAVE RIDER LOG (ใช้ LOG_SHEET_ID) ---
 def save_rider_log(picker_name, order_id, file_ids_list, folder_name, license_plate="-"):
     try:
-        creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
+        creds = get_credentials(); gc = gspread.authorize(creds)
+        sh = gc.open_by_key(LOG_SHEET_ID) # [UPDATED]
         try: 
             worksheet = sh.worksheet(RIDER_SHEET_NAME)
         except: 
@@ -198,7 +210,7 @@ def save_rider_log(picker_name, order_id, file_ids_list, folder_name, license_pl
         load_rider_history.clear() 
     except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
 
-# --- FOLDER STRUCTURE (PACKING) ---
+# --- FOLDER STRUCTURE ---
 def get_target_folder_structure(service, order_id, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
@@ -224,7 +236,6 @@ def get_target_folder_structure(service, order_id, main_parent_id):
     order_folder = service.files().create(body=meta_order, fields='id').execute()
     return order_folder.get('id')
 
-# --- FOLDER STRUCTURE (RIDER) ---
 def get_rider_daily_folder(service, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
@@ -273,7 +284,7 @@ def check_and_execute_reset():
         
         st.session_state.order_val = ""
         st.session_state.current_order_items = []
-        st.session_state.expected_items = [] # [NEW]
+        st.session_state.expected_items = [] 
         st.session_state.photo_gallery = [] 
         
         st.session_state.rider_photo_gallery = []
@@ -321,12 +332,8 @@ def init_session_state():
     if 'processing_rider' not in st.session_state: st.session_state.processing_rider = False
     if 'rider_scanned_orders' not in st.session_state: st.session_state.rider_scanned_orders = []
     
-    # [NEW] Rider Photo Gallery List
     if 'rider_photo_gallery' not in st.session_state: st.session_state.rider_photo_gallery = []
-    
-    # [NEW] Expected Items for Validation
     if 'expected_items' not in st.session_state: st.session_state.expected_items = []
-
     if 'rider_input_reset_key' not in st.session_state: st.session_state.rider_input_reset_key = 0
     if 'scan_status_msg' not in st.session_state: st.session_state.scan_status_msg = None
 
@@ -348,7 +355,8 @@ check_and_execute_reset()
 # --- LOGIN ---
 if not st.session_state.current_user_name:
     st.title("🔐 Login พนักงาน")
-    df_users = load_sheet_data(USER_SHEET_NAME)
+    # [UPDATED] Login uses LOG_SHEET_ID
+    df_users = load_sheet_data(USER_SHEET_NAME, LOG_SHEET_ID)
 
     if st.session_state.temp_login_user is None:
         st.info("กรุณาสแกนรหัสพนักงาน")
@@ -396,12 +404,12 @@ else:
         st.divider()
         if st.button("Logout", type="secondary"): logout_user()
 
-    # ================= MODE 1: PACKING (VERIFY WITH ORDER DATA) =================
+    # ================= MODE 1: PACKING =================
     if mode == "📦 แผนกแพ็คสินค้า":
         st.title("📦 ระบบเบิก-แพ็คสินค้า")
         
-        # [NEW] Load Order Data for Verification
-        df_order_data = load_sheet_data(ORDER_DATA_SHEET_NAME)
+        # [UPDATED] Load Order Data from NEW SHEET ID
+        df_order_data = load_sheet_data(ORDER_DATA_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
         if st.session_state.picking_phase == 'scan':
             st.markdown("#### 1. Scan Tracking (ตรวจสอบ Order Data)")
@@ -424,11 +432,9 @@ else:
             # --- 1.2 FETCH EXPECTED ITEMS ---
             if st.session_state.order_val:
                 if df_order_data.empty:
-                    st.error(f"❌ ไม่พบข้อมูลใน Sheet {ORDER_DATA_SHEET_NAME}")
+                    st.error(f"❌ ไม่พบข้อมูลใน Sheet {ORDER_DATA_SHEET_NAME} (ตรวจสอบสิทธิ์ไฟล์)")
                 else:
-                    # Filter items for this tracking
                     if not st.session_state.expected_items:
-                        # Find rows where Tracking matches
                         try:
                             matches = df_order_data[df_order_data['Tracking'] == st.session_state.order_val]
                             if matches.empty:
@@ -440,10 +446,8 @@ else:
 
                 if st.session_state.expected_items:
                     st.info(f"📋 รายการสินค้าที่ต้องแพ็ค ({len(st.session_state.expected_items)} รายการ):")
-                    # Show checklist
                     exp_df = pd.DataFrame(st.session_state.expected_items)
                     display_cols = ['Barcode', 'Product Name', 'Qty']
-                    # Filter only columns that exist
                     valid_display_cols = [c for c in display_cols if c in exp_df.columns]
                     st.dataframe(exp_df[valid_display_cols], use_container_width=True)
 
@@ -459,45 +463,33 @@ else:
                             res_p = decode(Image.open(scan_prod))
                             if res_p: st.session_state.prod_val = res_p[0].data.decode("utf-8"); st.rerun()
                     else:
-                        # [NEW] VERIFICATION LOGIC
                         scanned_barcode = st.session_state.prod_val
-                        
-                        # Check if scanned barcode is in expected list
-                        # This logic allows scanning any item in the order list (even if duplicated)
-                        # More complex logic needed if strict quantity control is required, 
-                        # but "Verify against Sheet" usually means "Is this item allowed for this order?"
-                        
                         found_item = None
                         for item in st.session_state.expected_items:
-                            # Compare barcodes (strip to be safe)
                             if str(item.get('Barcode', '')).strip() == scanned_barcode:
                                 found_item = item
                                 break
                         
                         if found_item:
-                            # Valid Item -> Add to packed list
                             new_item = {
                                 "Barcode": scanned_barcode,
                                 "Product Name": found_item.get('Product Name', 'Unknown'),
-                                "Location": found_item.get('Location', '-'), # Or keep blank if not in Order Data
+                                "Location": found_item.get('Location', '-'),
                                 "Qty": 1
                             }
                             st.session_state.current_order_items.append(new_item)
                             play_sound('success')
                             st.toast(f"✅ ถูกต้อง! เพิ่ม {found_item.get('Product Name', '')}", icon="🛒")
-                            
                             st.session_state.prod_val = ""
                             st.session_state.cam_counter += 1
                             st.rerun()
                         else:
-                            # Invalid Item
                             play_sound('error')
                             st.error(f"⛔ สินค้าผิด! Barcode {scanned_barcode} ไม่อยู่ใน Order นี้")
-                            time.sleep(1) # Pause to let user see error
+                            time.sleep(1)
                             if st.button("❌ สแกนใหม่"): 
                                 st.session_state.prod_val = ""; st.session_state.cam_counter += 1; st.rerun()
 
-                # --- 1.3 SHOW PACKED LIST ---
                 if st.session_state.current_order_items:
                     st.markdown("---")
                     st.markdown(f"### 🛒 สินค้าที่แพ็คแล้ว ({len(st.session_state.current_order_items)} ชิ้น)")
@@ -556,7 +548,6 @@ else:
                                 if not final_image_link_id: final_image_link_id = "-"
 
                                 for item in st.session_state.current_order_items:
-                                    # Save to existing LOGS sheet (using same function)
                                     save_log_to_sheet(
                                         st.session_state.current_user_name, 
                                         st.session_state.order_val, 
@@ -581,7 +572,7 @@ else:
                                 trigger_reset()
                                 st.rerun()
 
-    # ================= MODE 2: RIDER (MULTI-Tracking) =================
+    # ================= MODE 2: RIDER =================
     elif mode == "🚚 Scan ปิดตู้":
         st.title("🚚 Scan ปิดตู้")
         st.info("1. สแกน Tracking\n2. ถ่ายรูปปิดตู้ \n*รูปจะถูกบันทึกใน Folder วันที่ และ Link จะถูกบันทึกให้ทุก Tracking*")
@@ -665,7 +656,6 @@ else:
             # 2. ถ่ายรูปส่งมอบ (Multi-Image Gallery)
             st.markdown("#### 2. ถ่ายรูปปิดตู้ (สูงสุด 3 รูป)")
             
-            # Show Gallery
             if st.session_state.rider_photo_gallery:
                 cols = st.columns(3)
                 for idx, img_bytes in enumerate(st.session_state.rider_photo_gallery):
@@ -675,21 +665,17 @@ else:
                             st.session_state.rider_photo_gallery.pop(idx)
                             st.rerun()
 
-            # Camera Input (Only show if less than 3 photos)
             if len(st.session_state.rider_photo_gallery) < 3:
                 rider_img_input = back_camera_input("ถ่ายรูปเพิ่ม (กล้องหลัง)", key=f"rider_cam_act_{st.session_state.cam_counter}")
                 if rider_img_input:
-                    # Convert to RGB & Bytes
                     img_pil = Image.open(rider_img_input)
                     if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
                     buf = io.BytesIO()
                     img_pil.save(buf, format='JPEG', quality=120, optimize=True)
-                    
                     st.session_state.rider_photo_gallery.append(buf.getvalue())
                     st.session_state.cam_counter += 1
                     st.rerun()
             
-            # Upload Button
             if len(st.session_state.rider_photo_gallery) > 0:
                 st.write("")
                 if not st.session_state.processing_rider:
@@ -697,7 +683,6 @@ else:
                 else:
                     st.info("⏳ กำลังบันทึกข้อมูล... กรุณารอสักครู่")
                 
-                # Processing
                 if st.session_state.processing_rider:
                     with st.spinner("🚀 กำลังอัปโหลดรูปภาพ..."):
                         srv = authenticate_drive()
@@ -705,38 +690,19 @@ else:
                         rider_lp_val = rider_lp if rider_lp else "NoPlate"
                         lp_clean = rider_lp_val.replace(" ", "_")
                         
-                        # Get Daily Folder
                         daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
-                        
                         uploaded_ids = []
 
-                        # Loop Upload Images
                         for i, img_bytes in enumerate(st.session_state.rider_photo_gallery):
-                            # Name: Plate_DateTime_1.jpg
                             fn = f"{lp_clean}_{ts}_{i+1}.jpg"
                             uid = upload_photo(srv, img_bytes, fn, daily_fid)
                             uploaded_ids.append(uid)
                         
-                        # Loop Save Logs (Using List of UIDs)
                         for order in st.session_state.rider_scanned_orders:
                             target_ord_id = order['id']
-                            save_rider_log(
-                                st.session_state.current_user_name, 
-                                target_ord_id, 
-                                uploaded_ids, # Pass List
-                                daily_fname, 
-                                rider_lp_val
-                            )
+                            save_rider_log(st.session_state.current_user_name, target_ord_id, uploaded_ids, daily_fname, rider_lp_val)
                         
-                        st.markdown(
-                            """
-                            <div style="text-align: center;">
-                                <div style="font-size: 100px;">✅</div>
-                                <h2 style="color: #28a745; margin-top: -20px;">บันทึกครบถ้วน!</h2>
-                            </div>
-                            """, 
-                            unsafe_allow_html=True
-                        )
+                        st.markdown("""<div style="text-align: center;"><div style="font-size: 100px;">✅</div><h2 style="color: #28a745; margin-top: -20px;">บันทึกครบถ้วน!</h2></div>""", unsafe_allow_html=True)
                         time.sleep(2)
                         trigger_reset(); st.rerun()
         else:
