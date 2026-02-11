@@ -57,11 +57,16 @@ LOG_SHEET_NAME = 'Logs'
 RIDER_SHEET_NAME = 'Rider_Logs'
 USER_SHEET_NAME = 'User'
 
-# --- SOUND HELPER ---
+# --- SOUND HELPER (แก้ไขเพิ่มเสียง Scan) ---
 def play_sound(status='success'):
-    if status == 'success':
+    if status == 'scan':
+        # [UPDATED] เสียงติ๊ดเดียว (เหมือนเครื่องยิงบาร์โค้ด) สำหรับตอนสแกน Tracking
+        sound_url = "https://www.soundjay.com/buttons/sounds/beep-01a.mp3"
+    elif status == 'success':
+        # เสียงติ๊ดยาว (สำเร็จ) สำหรับตอนบันทึก Save
         sound_url = "https://www.soundjay.com/buttons/sounds/beep-07.mp3"
     else:
+        # เสียง Error
         sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
     
     st.markdown(f"""
@@ -608,7 +613,12 @@ else:
                 play_sound('error')
             else:
                 st.success(st.session_state.scan_status_msg['msg'])
-                play_sound('success')
+                # [UPDATED] เปลี่ยนเสียงตอน Scan Tracking เป็นแบบ scan (ติ๊ดเดียว)
+                if st.session_state.scan_status_msg['msg'].startswith("✅ เพิ่ม"):
+                    play_sound('scan')
+                else:
+                    play_sound('success')
+
             st.session_state.scan_status_msg = None
 
 
@@ -739,6 +749,9 @@ else:
                             target_ord_id = order['id']
                             save_rider_log(st.session_state.current_user_name, target_ord_id, uploaded_ids, daily_fname, rider_lp_val)
                         
+                        # [ADDED] Play Success Sound for Final Save
+                        play_sound('success')
+
                         st.markdown("""<div style="text-align: center;"><div style="font-size: 100px;">✅</div><h2 style="color: #28a745; margin-top: -20px;">บันทึกครบถ้วน!</h2></div>""", unsafe_allow_html=True)
                         time.sleep(2)
                         trigger_reset(); st.rerun()
