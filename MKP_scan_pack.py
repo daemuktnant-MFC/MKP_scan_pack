@@ -23,9 +23,9 @@ except ImportError:
 st.markdown(
     """
     <style>
-    h1 { font-size: 18px !important; } 
-    h2 { font-size: 14px !important; } 
-    h3 { font-size: 12px !important; } 
+    h1 { font-size: 14px !important; } 
+    h2 { font-size: 12px !important; } 
+    h3 { font-size: 10px !important; } 
     h4 { font-size: 9px !important; } 
     
     iframe[title="streamlit_back_camera_input.back_camera_input"] {
@@ -103,7 +103,7 @@ def authenticate_drive():
         st.error(f"Error Drive: {e}")
         return None
 
-# --- GOOGLE SERVICES (UPDATED: Mapping Column Name) ---
+# --- GOOGLE SERVICES ---
 @st.cache_data(ttl=600)
 def load_sheet_data(sheet_name, spreadsheet_key): 
     try:
@@ -130,27 +130,18 @@ def load_sheet_data(sheet_name, spreadsheet_key):
             df = pd.DataFrame(data, columns=headers)
             df.columns = df.columns.str.strip()
             
-            # [UPDATED] Normalize column names (ดึง Name -> Product Name)
+            # Normalize column names
             for col in df.columns:
                 col_clean = col.strip()
                 col_lower = col_clean.lower()
                 
-                # 1. จับคู่ Tracking/Order ID
                 if 'tracking' in col_lower or ('order' in col_lower and 'id' in col_lower): 
                     df.rename(columns={col: 'Tracking'}, inplace=True)
-                
-                # 2. จับคู่ Barcode
                 elif 'barcode' in col_lower:
                     df.rename(columns={col: 'Barcode'}, inplace=True)
-                    # ลบ .0 ทิ้งกรณีเป็นตัวเลข
                     df['Barcode'] = df['Barcode'].astype(str).str.replace(r'\.0$', '', regex=True)
-                
-                # 3. [สำคัญ] จับคู่ Column "Name" (K) ให้เป็น "Product Name"
-                # เช็คคำว่า "Name" เป๊ะๆ หรือ "product name"
                 elif col_clean == 'Name' or 'product name' in col_lower:
                      df.rename(columns={col: 'Product Name'}, inplace=True)
-                
-                # 4. จับคู่ Qty
                 elif 'qty' in col_lower or 'quantity' in col_lower:
                      df.rename(columns={col: 'Qty'}, inplace=True)
             
@@ -198,12 +189,9 @@ def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_
         creds = get_credentials(); gc = gspread.authorize(creds)
         sh = gc.open_by_key(LOG_SHEET_ID) 
         try: worksheet = sh.worksheet(LOG_SHEET_NAME)
-        # สร้าง Header ถ้ายังไม่มี: Column E คือ "Product Name" (ลำดับที่ 5)
         except: worksheet = sh.add_worksheet(title=LOG_SHEET_NAME, rows="1000", cols="20"); worksheet.append_row(["Timestamp", "Picker Name", "Order ID", "Barcode", "Product Name", "Location", "Pick Qty", "User", "Image Link (Col I)"])
         
         timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
-        
-        # บันทึกข้อมูล: prod_name จะไปลง Column E
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
         
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
@@ -378,7 +366,6 @@ check_and_execute_reset()
 # --- LOGIN ---
 if not st.session_state.current_user_name:
     st.title("🔐 Login พนักงาน")
-    # Login uses LOG_SHEET_ID (for User tab)
     df_users = load_sheet_data(USER_SHEET_NAME, LOG_SHEET_ID)
 
     if st.session_state.temp_login_user is None:
@@ -431,7 +418,7 @@ else:
     if mode == "📦 แผนกแพ็คสินค้า":
         st.title("📦 ระบบเบิก-แพ็คสินค้า")
         
-        # Load Order Data from ORDER_CHECK_SHEET_ID
+        # Load Order Data
         df_order_data = load_sheet_data(ORDER_DATA_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
         if st.session_state.picking_phase == 'scan':
@@ -452,7 +439,7 @@ else:
                 with c2: 
                     if st.button("เปลี่ยน Tracking"): trigger_reset(); st.rerun()
 
-            # --- 1.2 FETCH EXPECTED ITEMS ---
+            # --- 1.2 FETCH & VALIDATE ---
             if st.session_state.order_val:
                 if df_order_data.empty:
                     st.error(f"❌ ไม่พบข้อมูลใน Sheet {ORDER_DATA_SHEET_NAME} (ตรวจสอบสิทธิ์ไฟล์)")
@@ -460,8 +447,15 @@ else:
                     if not st.session_state.expected_items:
                         try:
                             matches = df_order_data[df_order_data['Tracking'] == st.session_state.order_val]
+                            
+                            # [UPDATED] STRICT VALIDATION MODE 1
                             if matches.empty:
-                                st.error(f"❌ ไม่พบ Tracking: {st.session_state.order_val} ในระบบ Order Data")
+                                play_sound('error')
+                                st.error(f"⛔ ไม่พบ Tracking: {st.session_state.order_val} ในระบบ! (กรุณาตรวจสอบ)")
+                                time.sleep(2)
+                                # Force Reset Logic
+                                st.session_state.order_val = ""
+                                st.rerun()
                             else:
                                 st.session_state.expected_items = matches.to_dict('records')
                         except KeyError:
@@ -599,6 +593,9 @@ else:
     elif mode == "🚚 Scan ปิดตู้":
         st.title("🚚 Scan ปิดตู้")
         st.info("1. สแกน Tracking\n2. ถ่ายรูปปิดตู้ \n*รูปจะถูกบันทึกใน Folder วันที่ และ Link จะถูกบันทึกให้ทุก Tracking*")
+        
+        # [UPDATED] Load Order Data for Validation
+        df_order_data_rider = load_sheet_data(ORDER_DATA_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
         # 0. ระบุทะเบียนรถ
         st.markdown("#### 0. ระบุทะเบียนรถ (Optional)")
@@ -639,7 +636,24 @@ else:
         if current_rider_order:
             existing_ids = [o['id'] for o in st.session_state.rider_scanned_orders]
             
-            if current_rider_order in existing_ids:
+            # [UPDATED] STRICT VALIDATION MODE 2
+            # Check if order exists in Master Data?
+            valid_trackings = []
+            if not df_order_data_rider.empty and 'Tracking' in df_order_data_rider.columns:
+                 valid_trackings = df_order_data_rider['Tracking'].astype(str).str.strip().str.upper().tolist()
+            
+            if not valid_trackings:
+                 st.session_state.scan_status_msg = {'type': 'error', 'msg': f"⚠️ โหลดข้อมูล Order Data ไม่สำเร็จ หรือไฟล์ว่างเปล่า"}
+                 st.session_state.rider_input_reset_key += 1
+                 st.rerun()
+
+            elif current_rider_order not in valid_trackings:
+                st.session_state.scan_status_msg = {'type': 'error', 'msg': f"⛔ ไม่พบ Tracking: {current_rider_order} ในระบบ!"}
+                st.session_state.rider_input_reset_key += 1
+                st.session_state.cam_counter += 1
+                st.rerun()
+
+            elif current_rider_order in existing_ids:
                 st.session_state.scan_status_msg = {'type': 'error', 'msg': f"⚠️ {current_rider_order} มีในตะกร้าแล้ว!"}
                 st.session_state.rider_input_reset_key += 1
                 st.session_state.cam_counter += 1
