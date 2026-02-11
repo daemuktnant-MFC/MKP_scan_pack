@@ -11,6 +11,7 @@ import io
 import time
 from googleapiclient.errors import HttpError
 import json
+import base64 # [ADDED] เพิ่ม library นี้
 
 # --- IMPORT LIBRARY กล้อง ---
 try:
@@ -57,23 +58,47 @@ LOG_SHEET_NAME = 'Logs'
 RIDER_SHEET_NAME = 'Rider_Logs'
 USER_SHEET_NAME = 'User'
 
-# --- SOUND HELPER (แก้ไขเพิ่มเสียง Scan) ---
+# --- [UPDATED] SOUND HELPER (เล่นไฟล์ในเครื่อง) ---
 def play_sound(status='success'):
-    if status == 'scan':
-        # [UPDATED] เสียงติ๊ดเดียว (เหมือนเครื่องยิงบาร์โค้ด) สำหรับตอนสแกน Tracking
-        sound_url = "https://www.soundjay.com/buttons/sounds/beep-01a.mp3"
-    elif status == 'success':
-        # เสียงติ๊ดยาว (สำเร็จ) สำหรับตอนบันทึก Save
-        sound_url = "https://www.myinstants.com/en/instant/buy/?utm_source=copy&utm_medium=share"
-    else:
-        # เสียง Error
-        sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
+    # กำหนดชื่อไฟล์เสียงที่ต้องการ (ต้องวางไฟล์ไว้ที่เดียวกับ Code)
+    sound_files = {
+        'scan': 'beep.mp3',       # เสียงติ๊ดเดียว
+        'success': 'success.mp3', # เสียงสำเร็จ
+        'error': 'error.mp3'      # เสียง Error
+    }
     
-    st.markdown(f"""
-        <audio autoplay>
-            <source src="{sound_url}" type="audio/mp3">
-        </audio>
-        """, unsafe_allow_html=True)
+    # กำหนด Link สำรอง (กรณีหาไฟล์ในเครื่องไม่เจอ)
+    backup_urls = {
+        'scan': "https://www.myinstants.com/media/sounds/barcode-scanner-beep-sound.mp3",
+        'success': "https://www.myinstants.com/media/sounds/success-sound-effect.mp3",
+        'error': "https://www.myinstants.com/media/sounds/error_CDOxCNm.mp3"
+    }
+
+    target_file = sound_files.get(status, 'beep.mp3')
+    
+    try:
+        # 1. พยายามอ่านไฟล์จากเครื่อง (Local File)
+        with open(target_file, "rb") as f:
+            data = f.read()
+            b64 = base64.b64encode(data).decode()
+            
+            # ฝัง Base64 ลงใน HTML
+            md = f"""
+                <audio autoplay>
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                </audio>
+                """
+            st.markdown(md, unsafe_allow_html=True)
+            
+    except FileNotFoundError:
+        # 2. ถ้าไม่เจอไฟล์ในเครื่อง -> ใช้ Link สำรองแทน (Fallback)
+        # st.warning(f"⚠️ ไม่พบไฟล์ {target_file} ใช้เสียงออนไลน์แทน") # ปิดไว้จะได้ไม่รก
+        sound_url = backup_urls.get(status, backup_urls['scan'])
+        st.markdown(f"""
+            <audio autoplay>
+                <source src="{sound_url}" type="audio/mp3">
+            </audio>
+            """, unsafe_allow_html=True)
 
 # --- AUTHENTICATION ---
 def get_credentials():
