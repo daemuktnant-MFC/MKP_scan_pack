@@ -23,9 +23,9 @@ except ImportError:
 st.markdown(
     """
     <style>
-    h1 { font-size: 14px !important; } 
-    h2 { font-size: 12px !important; } 
-    h3 { font-size: 10px !important; } 
+    h1 { font-size: 18px !important; } 
+    h2 { font-size: 14px !important; } 
+    h3 { font-size: 12px !important; } 
     h4 { font-size: 9px !important; } 
     
     iframe[title="streamlit_back_camera_input.back_camera_input"] {
@@ -43,13 +43,13 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- CONFIGURATION (แยกไฟล์เก็บข้อมูล กับ ไฟล์ตรวจสอบ) ---
+# --- CONFIGURATION ---
 MAIN_FOLDER_ID = '1sZQKOuw4YGazuy4euk4ns7nLr7Zie6cm'
 
-# [UPDATED] 1. ไฟล์สำหรับบันทึก Log และ User (ไฟล์เดิม)
+# 1. ไฟล์สำหรับบันทึก Log (ปลายทาง)
 LOG_SHEET_ID = '1tZfX9I6Ntbo-Jf2_rcqBc2QYUrCCCSAx8K4YBkly92c' 
 
-# [UPDATED] 2. ไฟล์สำหรับตรวจสอบ Order Data (ไฟล์ใหม่)
+# 2. ไฟล์สำหรับตรวจสอบ Order Data (ต้นทาง)
 ORDER_CHECK_SHEET_ID = '1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08' 
 
 ORDER_DATA_SHEET_NAME = 'Order_Data'
@@ -103,19 +103,26 @@ def authenticate_drive():
         st.error(f"Error Drive: {e}")
         return None
 
-# --- GOOGLE SERVICES (UPDATED: รองรับหลายไฟล์) ---
+# --- GOOGLE SERVICES (UPDATED: Mapping Column Name) ---
 @st.cache_data(ttl=600)
-def load_sheet_data(sheet_name, spreadsheet_key): # [UPDATED] รับ Key ของไฟล์ที่จะโหลด
+def load_sheet_data(sheet_name, spreadsheet_key): 
     try:
         creds = get_credentials()
         if not creds: return pd.DataFrame()
         gc = gspread.authorize(creds)
         
-        # เปิดไฟล์ตาม Key ที่ส่งมา
-        sh = gc.open_by_key(spreadsheet_key)
+        try:
+            sh = gc.open_by_key(spreadsheet_key)
+        except Exception as e:
+            st.error(f"❌ เปิดไฟล์ Google Sheet ไม่ได้ (ID: {spreadsheet_key}): {e}")
+            return pd.DataFrame()
         
-        if isinstance(sheet_name, int): worksheet = sh.get_worksheet(sheet_name)
-        else: worksheet = sh.worksheet(sheet_name)
+        try:
+            if isinstance(sheet_name, int): worksheet = sh.get_worksheet(sheet_name)
+            else: worksheet = sh.worksheet(sheet_name)
+        except Exception as e:
+            st.error(f"❌ ไม่พบ Tab ชื่อ '{sheet_name}' ในไฟล์ Sheet: {e}")
+            return pd.DataFrame()
         
         rows = worksheet.get_all_values()
         if len(rows) > 1:
@@ -123,33 +130,44 @@ def load_sheet_data(sheet_name, spreadsheet_key): # [UPDATED] รับ Key ข�
             df = pd.DataFrame(data, columns=headers)
             df.columns = df.columns.str.strip()
             
-            # Normalize column names
+            # [UPDATED] Normalize column names (ดึง Name -> Product Name)
             for col in df.columns:
-                col_lower = col.lower()
-                if 'tracking' in col_lower or 'order' in col_lower and 'id' in col_lower: 
+                col_clean = col.strip()
+                col_lower = col_clean.lower()
+                
+                # 1. จับคู่ Tracking/Order ID
+                if 'tracking' in col_lower or ('order' in col_lower and 'id' in col_lower): 
                     df.rename(columns={col: 'Tracking'}, inplace=True)
+                
+                # 2. จับคู่ Barcode
                 elif 'barcode' in col_lower:
                     df.rename(columns={col: 'Barcode'}, inplace=True)
+                    # ลบ .0 ทิ้งกรณีเป็นตัวเลข
                     df['Barcode'] = df['Barcode'].astype(str).str.replace(r'\.0$', '', regex=True)
-                elif 'product' in col_lower or 'item' in col_lower:
+                
+                # 3. [สำคัญ] จับคู่ Column "Name" (K) ให้เป็น "Product Name"
+                # เช็คคำว่า "Name" เป๊ะๆ หรือ "product name"
+                elif col_clean == 'Name' or 'product name' in col_lower:
                      df.rename(columns={col: 'Product Name'}, inplace=True)
+                
+                # 4. จับคู่ Qty
                 elif 'qty' in col_lower or 'quantity' in col_lower:
                      df.rename(columns={col: 'Qty'}, inplace=True)
             
             return df
         return pd.DataFrame()
     except Exception as e:
-        # st.error(f"Load Error: {e}") # Uncomment to debug
+        st.error(f"❌ Load Error Other: {e}") 
         return pd.DataFrame()
 
-# Load Rider History (ใช้ LOG_SHEET_ID)
+# Load Rider History
 @st.cache_data(ttl=30)
 def load_rider_history():
     try:
         creds = get_credentials()
         if not creds: return []
         gc = gspread.authorize(creds)
-        sh = gc.open_by_key(LOG_SHEET_ID) # [UPDATED]
+        sh = gc.open_by_key(LOG_SHEET_ID) 
         try:
             worksheet = sh.worksheet(RIDER_SHEET_NAME)
             records = worksheet.get_all_records()
@@ -174,22 +192,27 @@ def get_thai_date_str(): return (datetime.utcnow() + timedelta(hours=7)).strftim
 def get_thai_time_suffix(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%H-%M")
 def get_thai_ts_filename(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%Y%m%d_%H%M%S")
 
-# --- SAVE LOGS (ใช้ LOG_SHEET_ID) ---
+# --- SAVE LOGS ---
 def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, file_id):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds)
-        sh = gc.open_by_key(LOG_SHEET_ID) # [UPDATED]
+        sh = gc.open_by_key(LOG_SHEET_ID) 
         try: worksheet = sh.worksheet(LOG_SHEET_NAME)
+        # สร้าง Header ถ้ายังไม่มี: Column E คือ "Product Name" (ลำดับที่ 5)
         except: worksheet = sh.add_worksheet(title=LOG_SHEET_NAME, rows="1000", cols="20"); worksheet.append_row(["Timestamp", "Picker Name", "Order ID", "Barcode", "Product Name", "Location", "Pick Qty", "User", "Image Link (Col I)"])
+        
         timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
+        
+        # บันทึกข้อมูล: prod_name จะไปลง Column E
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
+        
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
 
-# --- SAVE RIDER LOG (ใช้ LOG_SHEET_ID) ---
+# --- SAVE RIDER LOG ---
 def save_rider_log(picker_name, order_id, file_ids_list, folder_name, license_plate="-"):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds)
-        sh = gc.open_by_key(LOG_SHEET_ID) # [UPDATED]
+        sh = gc.open_by_key(LOG_SHEET_ID) 
         try: 
             worksheet = sh.worksheet(RIDER_SHEET_NAME)
         except: 
@@ -355,7 +378,7 @@ check_and_execute_reset()
 # --- LOGIN ---
 if not st.session_state.current_user_name:
     st.title("🔐 Login พนักงาน")
-    # [UPDATED] Login uses LOG_SHEET_ID
+    # Login uses LOG_SHEET_ID (for User tab)
     df_users = load_sheet_data(USER_SHEET_NAME, LOG_SHEET_ID)
 
     if st.session_state.temp_login_user is None:
@@ -408,7 +431,7 @@ else:
     if mode == "📦 แผนกแพ็คสินค้า":
         st.title("📦 ระบบเบิก-แพ็คสินค้า")
         
-        # [UPDATED] Load Order Data from NEW SHEET ID
+        # Load Order Data from ORDER_CHECK_SHEET_ID
         df_order_data = load_sheet_data(ORDER_DATA_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
         if st.session_state.picking_phase == 'scan':
