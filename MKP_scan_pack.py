@@ -64,7 +64,7 @@ def play_sound(status='success'):
         sound_url = "https://www.soundjay.com/buttons/sounds/beep-01a.mp3"
     elif status == 'success':
         # เสียงติ๊ดยาว (สำเร็จ) สำหรับตอนบันทึก Save
-        sound_url = "https://www.soundjay.com/buttons/sounds/beep-07.mp3"
+        sound_url = "https://www.myinstants.com/media/sounds/barcode-scanner-beep-sound.mp3"
     else:
         # เสียง Error
         sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
