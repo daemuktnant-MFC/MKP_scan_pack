@@ -23,6 +23,12 @@ except ImportError:
 st.markdown(
     """
     <style>
+    /* ปรับขนาดตัวหนังสือ Header ตามระดับ */
+    h1 { font-size: 14px !important; }  /* หัวข้อใหญ่สุด (st.title) */
+    h2 { font-size: 12px !important; }  /* หัวข้อรอง (st.header) */
+    h3 { font-size: 10px !important; }  /* หัวข้อย่อย (st.subheader หรือ ###) */
+    h4 { font-size: 9px !important; }  /* หัวข้อเล็ก (####) */
+    
     iframe[title="streamlit_back_camera_input.back_camera_input"] {
         min-height: 450px !important; 
         height: 150% !important;
@@ -45,10 +51,10 @@ LOG_SHEET_NAME = 'Logs'
 RIDER_SHEET_NAME = 'Rider_Logs'
 USER_SHEET_NAME = 'User'
 
-# --- SOUND HELPER (เล่นเสียง) ---
+# --- SOUND HELPER ---
 def play_sound(status='success'):
     if status == 'success':
-        sound_url = "https://www.soundjay.com/buttons/sounds/button-16.mp3"
+        sound_url = "https://www.soundjay.com/buttons/sounds/beep-07.mp3"
     else:
         sound_url = "https://www.soundjay.com/buttons/sounds/button-10.mp3"
     
@@ -159,8 +165,8 @@ def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
 
-# --- RIDER LOG ---
-def save_rider_log(picker_name, order_id, file_id, folder_name, license_plate="-"):
+# --- RIDER LOG (UPDATED: Support Multiple Images) ---
+def save_rider_log(picker_name, order_id, file_ids_list, folder_name, license_plate="-"):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(SHEET_ID)
         try: 
@@ -168,12 +174,23 @@ def save_rider_log(picker_name, order_id, file_id, folder_name, license_plate="-
         except: 
             worksheet = sh.add_worksheet(title=RIDER_SHEET_NAME, rows="1000", cols="10")
             worksheet.append_row(["Timestamp", "User Name", "Order ID", "License Plate", "Folder Name", "Rider Image Link"])
-        timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
-        worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, image_link])
+        
+        timestamp = get_thai_time()
+        
+        # [NEW] Handle List of IDs -> Multiple Links
+        links = []
+        if isinstance(file_ids_list, list):
+            for fid in file_ids_list:
+                links.append(f"https://drive.google.com/open?id={fid}")
+            image_link_str = "\n".join(links) # Join with new line
+        else:
+            image_link_str = f"https://drive.google.com/open?id={file_ids_list}"
+
+        worksheet.append_row([timestamp, picker_name, order_id, license_plate, folder_name, image_link_str])
         load_rider_history.clear() 
     except Exception as e: st.warning(f"⚠️ บันทึก Rider Log ไม่สำเร็จ: {e}")
 
-# --- FOLDER STRUCTURE LOGIC (PACKING) ---
+# --- FOLDER STRUCTURE (PACKING) ---
 def get_target_folder_structure(service, order_id, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
@@ -199,14 +216,12 @@ def get_target_folder_structure(service, order_id, main_parent_id):
     order_folder = service.files().create(body=meta_order, fields='id').execute()
     return order_folder.get('id')
 
-# --- FOLDER STRUCTURE LOGIC (RIDER) ---
+# --- FOLDER STRUCTURE (RIDER) ---
 def get_rider_daily_folder(service, main_parent_id):
     now = datetime.utcnow() + timedelta(hours=7)
     year_str = now.strftime("%Y")
     month_str = now.strftime("%m")
     date_str = now.strftime("%d-%m-%Y")
-    
-    # ชื่อ Folder สุดท้าย: Rider_10-02-2026
     folder_name = f"Rider_{date_str}"
 
     def _get_or_create(parent_id, name):
@@ -218,15 +233,9 @@ def get_rider_daily_folder(service, main_parent_id):
         folder = service.files().create(body=meta, fields='id').execute()
         return folder.get('id')
     
-    # Step 1: Year (YYYY)
     year_id = _get_or_create(main_parent_id, year_str)
-    
-    # Step 2: Month (MM)
     month_id = _get_or_create(year_id, month_str)
-    
-    # Step 3: Day/Rider Folder (Rider_DD-MM-YYYY)
     final_id = _get_or_create(month_id, folder_name)
-    
     return final_id, folder_name
 
 def upload_photo(service, file_obj, filename, folder_id):
@@ -250,15 +259,17 @@ def trigger_reset():
 
 def check_and_execute_reset():
     if st.session_state.get('need_reset'):
-        # Reset Logic for Mode 1
         if 'pack_order_man' in st.session_state: st.session_state.pack_order_man = ""
         if 'pack_prod_man' in st.session_state: st.session_state.pack_prod_man = ""
         if 'loc_man' in st.session_state: st.session_state.loc_man = ""
         
-        # Reset State Variables
         st.session_state.order_val = ""
         st.session_state.current_order_items = []
         st.session_state.photo_gallery = [] 
+        
+        # [NEW] Clear Rider Photo Gallery
+        st.session_state.rider_photo_gallery = []
+        
         st.session_state.rider_photo = None
         st.session_state.picking_phase = 'scan'
         st.session_state.temp_login_user = None
@@ -272,11 +283,9 @@ def check_and_execute_reset():
         st.session_state.cam_counter += 1
         st.session_state.need_reset = False
         
-        # Reset Processing Flags
         st.session_state.processing_pack = False
         st.session_state.processing_rider = False
         
-        # Reset Rider List & Input Helper
         st.session_state.rider_scanned_orders = []
         st.session_state.rider_input_reset_key += 1 
 
@@ -284,7 +293,7 @@ def logout_user():
     st.session_state.current_user_name = ""; st.session_state.current_user_id = ""
     trigger_reset(); st.rerun()
 
-# --- CALLBACKS FOR BUTTONS (PREVENT DOUBLE SUBMIT) ---
+# --- CALLBACKS ---
 def go_to_pack_phase():
     st.session_state.picking_phase = 'pack'
 
@@ -304,6 +313,9 @@ def init_session_state():
     if 'processing_rider' not in st.session_state: st.session_state.processing_rider = False
     if 'rider_scanned_orders' not in st.session_state: st.session_state.rider_scanned_orders = []
     
+    # [NEW] Rider Photo Gallery List
+    if 'rider_photo_gallery' not in st.session_state: st.session_state.rider_photo_gallery = []
+
     if 'rider_input_reset_key' not in st.session_state: st.session_state.rider_input_reset_key = 0
     if 'scan_status_msg' not in st.session_state: st.session_state.scan_status_msg = None
 
@@ -379,20 +391,20 @@ else:
         df_items = load_sheet_data(0)
 
         if st.session_state.picking_phase == 'scan':
-            st.markdown("#### 1. Order ID")
+            st.markdown("#### 1. Scan Tracking")
             if not st.session_state.order_val:
                 col1, col2 = st.columns([3, 1])
-                manual_order = col1.text_input("พิมพ์ Order ID", key="pack_order_man").strip().upper()
+                manual_order = col1.text_input("พิมพ์ Tracking ID", key="pack_order_man").strip().upper()
                 if manual_order: st.session_state.order_val = manual_order; st.rerun()
-                scan_order = back_camera_input("แตะเพื่อสแกน Order", key=f"pack_cam_{st.session_state.cam_counter}")
+                scan_order = back_camera_input("แตะเพื่อสแกน Tracking", key=f"pack_cam_{st.session_state.cam_counter}")
                 if scan_order:
                     res = decode(Image.open(scan_order))
                     if res: st.session_state.order_val = res[0].data.decode("utf-8").upper(); st.rerun()
             else:
                 c1, c2 = st.columns([3, 1])
-                with c1: st.success(f"📦 Order: **{st.session_state.order_val}**")
+                with c1: st.success(f"📦 Tracking: **{st.session_state.order_val}**")
                 with c2: 
-                    if st.button("เปลี่ยน Order"): trigger_reset(); st.rerun()
+                    if st.button("เปลี่ยน Tracking"): trigger_reset(); st.rerun()
 
             if st.session_state.order_val:
                 st.markdown("---"); st.markdown("#### 2. เพิ่มรายการสินค้า (Scan & Add)")
@@ -405,7 +417,6 @@ else:
                         res_p = decode(Image.open(scan_prod))
                         if res_p: st.session_state.prod_val = res_p[0].data.decode("utf-8"); st.rerun()
                 else:
-                    # AUTO ADD LOGIC
                     target_loc_str = "Unknown"
                     prod_found = False
                     
@@ -448,7 +459,7 @@ else:
                     st.button("✅ ยืนยันรายการครบแล้ว (ไปถ่ายรูป)", type="primary", use_container_width=True, on_click=go_to_pack_phase)
 
         elif st.session_state.picking_phase == 'pack':
-            st.success(f"📦 Order: **{st.session_state.order_val}** (ยืนยันแล้ว)")
+            st.success(f"📦 Tracking: **{st.session_state.order_val}** (ยืนยันแล้ว)")
             st.info("รายการสินค้าที่จะแพ็ค:")
             st.dataframe(pd.DataFrame(st.session_state.current_order_items), use_container_width=True)
             st.markdown("#### 3. ถ่ายรูปปิดกล่อง (รวมทุกชิ้น)")
@@ -465,8 +476,7 @@ else:
                 if pack_img:
                     img_pil = Image.open(pack_img)
                     if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
-                    # [HIGH QUALITY]
-                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG', quality=95, optimize=True)
+                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG', quality=120, optimize=True)
                     st.session_state.photo_gallery.append(buf.getvalue())
                     st.session_state.cam_counter += 1; st.rerun()
             
@@ -524,46 +534,41 @@ else:
                                 trigger_reset()
                                 st.rerun()
 
-    # ================= MODE 2: RIDER (MULTI-ORDER) =================
+    # ================= MODE 2: RIDER (MULTI-Tracking) =================
     elif mode == "🚚 Scan ปิดตู้":
-        st.title("🚚 Scan ปิดตู้ (Multi-Order)")
-        st.info("1. สแกน Order ที่จะส่งทั้งหมดลงตะกร้า\n2. ถ่ายรูปยืนยัน (รูปเดียวใช้กับทุก Order)\n*ระบบจะบันทึกลง Folder: Rider_Uploads_วันนี้ โดยอัตโนมัติ*")
+        st.title("🚚 Scan ปิดตู้")
+        st.info("1. สแกน Tracking\n2. ถ่ายรูปปิดตู้ \n*รูปจะถูกบันทึกใน Folder วันที่ และ Link จะถูกบันทึกให้ทุก Tracking*")
 
         # 0. ระบุทะเบียนรถ
         st.markdown("#### 0. ระบุทะเบียนรถ (Optional)")
         rider_lp = st.text_input("🚛 ทะเบียนรถ", key="rider_lp_input", placeholder="กรอกทะเบียนรถที่มารับสินค้า...").strip()
 
-        # [STATUS MESSAGE & AUDIO PLAYBACK]
+        # STATUS MESSAGE
         if st.session_state.scan_status_msg:
-            # Show Message
             if st.session_state.scan_status_msg['type'] == 'error':
                 st.error(st.session_state.scan_status_msg['msg'])
                 play_sound('error')
             else:
                 st.success(st.session_state.scan_status_msg['msg'])
                 play_sound('success')
-            
-            # Reset message after showing once
             st.session_state.scan_status_msg = None
 
 
-        # 1. ส่วนสแกน Order
-        st.markdown("#### 1. สแกน Order")
+        # 1. ส่วนสแกน Tracking
+        st.markdown("#### 1. Scan Tracking")
         
         col_r1, col_r2 = st.columns([3, 1])
-        # [FIX] ใช้ Key ที่เปลี่ยนค่าได้ เพื่อบังคับล้างค่า Input
         dynamic_key = f"rider_ord_man_{st.session_state.rider_input_reset_key}"
-        man_rider_ord = col_r1.text_input("พิมพ์ Order ID", key=dynamic_key).strip().upper()
+        man_rider_ord = col_r1.text_input("พิมพ์ Tracking ID", key=dynamic_key).strip().upper()
         
         with col_r2:
             st.write("") 
             st.write("")
             manual_submit = st.button("ตกลง", use_container_width=True)
 
-        scan_rider_ord = back_camera_input("แตะเพื่อสแกน Order", key=f"rider_cam_ord_{st.session_state.cam_counter}")
+        scan_rider_ord = back_camera_input("แตะเพื่อสแกน Tracking", key=f"rider_cam_ord_{st.session_state.cam_counter}")
         
         current_rider_order = ""
-        # Priority: Manual Submit > Camera
         if manual_submit and man_rider_ord:
              current_rider_order = man_rider_ord
         elif scan_rider_ord:
@@ -571,7 +576,6 @@ else:
             if res: current_rider_order = res[0].data.decode("utf-8").upper()
 
         if current_rider_order:
-            # 1. Check Duplicate in CURRENT SESSION
             existing_ids = [o['id'] for o in st.session_state.rider_scanned_orders]
             
             if current_rider_order in existing_ids:
@@ -579,30 +583,21 @@ else:
                 st.session_state.rider_input_reset_key += 1
                 st.session_state.cam_counter += 1
                 st.rerun()
-            
             else:
-                # 2. Check Duplicate in GOOGLE SHEET (Historical)
                 history_list = load_rider_history()
-                
                 if current_rider_order in history_list:
-                    st.session_state.scan_status_msg = {'type': 'error', 'msg': f"⛔ {current_rider_order} เคยบันทึกไปแล้วใน Sheet!"}
+                    st.session_state.scan_status_msg = {'type': 'error', 'msg': f"⛔ {current_rider_order} เคยบันทึกไปแล้ว!"}
                     st.session_state.rider_input_reset_key += 1
                     st.session_state.cam_counter += 1
                     st.rerun()
-                
                 else:
-                    # ✅ Passed all checks
-                    st.session_state.rider_scanned_orders.append({
-                        'id': current_rider_order,
-                        'folder_id': None, 
-                        'folder_name': 'Daily_Upload'
-                    })
+                    st.session_state.rider_scanned_orders.append({'id': current_rider_order})
                     st.session_state.scan_status_msg = {'type': 'success', 'msg': f"✅ เพิ่ม: {current_rider_order}"}
                     st.session_state.rider_input_reset_key += 1
                     st.session_state.cam_counter += 1
                     st.rerun()
 
-        # แสดงรายการ Order ที่สแกนแล้ว
+        # รายการ Tracking ที่สแกนแล้ว
         if st.session_state.rider_scanned_orders:
             st.markdown(f"##### 📋 รายการที่สแกนแล้ว ({len(st.session_state.rider_scanned_orders)})")
             
@@ -620,66 +615,82 @@ else:
             
             st.markdown("---")
 
-            # 2. ถ่ายรูปส่งมอบ
-            st.markdown("#### 2. ถ่ายรูปส่งมอบ")
-            rider_img_input = back_camera_input("ถ่ายรูปส่งมอบ (ใบเดียว)", key=f"rider_cam_act_{st.session_state.cam_counter}")
+            # 2. ถ่ายรูปส่งมอบ (Multi-Image Gallery)
+            st.markdown("#### 2. ถ่ายรูปปิดตู้ (สูงสุด 3 รูป)")
             
-            if rider_img_input:
-                st.image(rider_img_input, caption="รูปที่จะบันทึกให้ทุก Order", width=300)
-                
-                col_upload, col_clear = st.columns([2, 1])
-                with col_clear:
-                    if st.button("ถ่ายใหม่", type="secondary", use_container_width=True):
-                         st.session_state.cam_counter += 1; st.rerun()
-                
-                with col_upload:
-                    if not st.session_state.processing_rider:
-                        st.button(f"🚀 ยืนยันบันทึก ({len(st.session_state.rider_scanned_orders)} Orders)", type="primary", use_container_width=True, on_click=click_confirm_rider)
-                    else:
-                        st.info("⏳ กำลังบันทึกข้อมูล... กรุณารอสักครู่")
+            # Show Gallery
+            if st.session_state.rider_photo_gallery:
+                cols = st.columns(3)
+                for idx, img_bytes in enumerate(st.session_state.rider_photo_gallery):
+                    with cols[idx]:
+                        st.image(img_bytes, use_column_width=True)
+                        if st.button("ลบรูป", key=f"del_rider_img_{idx}"):
+                            st.session_state.rider_photo_gallery.pop(idx)
+                            st.rerun()
+
+            # Camera Input (Only show if less than 3 photos)
+            if len(st.session_state.rider_photo_gallery) < 3:
+                rider_img_input = back_camera_input("ถ่ายรูปเพิ่ม (กล้องหลัง)", key=f"rider_cam_act_{st.session_state.cam_counter}")
+                if rider_img_input:
+                    # Convert to RGB & Bytes
+                    img_pil = Image.open(rider_img_input)
+                    if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
+                    buf = io.BytesIO()
+                    img_pil.save(buf, format='JPEG', quality=120, optimize=True)
                     
-                    if st.session_state.processing_rider:
-                        with st.spinner("🚀 กำลังอัปโหลดรูปภาพ..."):
-                            srv = authenticate_drive()
-                            ts = get_thai_ts_filename()
-                            rider_lp_val = rider_lp if rider_lp else "NoPlate"
-                            lp_clean = rider_lp_val.replace(" ", "_")
-                            
-                            # [MODIFIED] Upload ONCE
-                            # 1. Create Buffer
-                            img_pil_rider = Image.open(rider_img_input)
-                            if img_pil_rider.mode in ("RGBA", "P"): img_pil_rider = img_pil_rider.convert("RGB")
-                            buf_rider = io.BytesIO()
-                            img_pil_rider.save(buf_rider, format='JPEG', quality=95, optimize=True)
-                            
-                            # 2. Define Single Filename (Plate + Time)
-                            fn = f"{lp_clean}_{ts}.jpg"
-                            
-                            # 3. Get Folder & Upload
-                            daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
-                            uid = upload_photo(srv, buf_rider.getvalue(), fn, daily_fid)
-                            
-                            # 4. Loop to Save Logs (Using same UID)
-                            for order in st.session_state.rider_scanned_orders:
-                                target_ord_id = order['id']
-                                save_rider_log(
-                                    st.session_state.current_user_name, 
-                                    target_ord_id, 
-                                    uid, 
-                                    daily_fname, 
-                                    rider_lp_val
-                                )
-                            
-                            st.markdown(
-                                """
-                                <div style="text-align: center;">
-                                    <div style="font-size: 100px;">✅</div>
-                                    <h2 style="color: #28a745; margin-top: -20px;">บันทึกครบถ้วน!</h2>
-                                </div>
-                                """, 
-                                unsafe_allow_html=True
+                    st.session_state.rider_photo_gallery.append(buf.getvalue())
+                    st.session_state.cam_counter += 1
+                    st.rerun()
+            
+            # Upload Button
+            if len(st.session_state.rider_photo_gallery) > 0:
+                st.write("")
+                if not st.session_state.processing_rider:
+                    st.button(f"🚀 ยืนยันบันทึก ({len(st.session_state.rider_scanned_orders)} Orders)", type="primary", use_container_width=True, on_click=click_confirm_rider)
+                else:
+                    st.info("⏳ กำลังบันทึกข้อมูล... กรุณารอสักครู่")
+                
+                # Processing
+                if st.session_state.processing_rider:
+                    with st.spinner("🚀 กำลังอัปโหลดรูปภาพ..."):
+                        srv = authenticate_drive()
+                        ts = get_thai_ts_filename()
+                        rider_lp_val = rider_lp if rider_lp else "NoPlate"
+                        lp_clean = rider_lp_val.replace(" ", "_")
+                        
+                        # Get Daily Folder
+                        daily_fid, daily_fname = get_rider_daily_folder(srv, MAIN_FOLDER_ID)
+                        
+                        uploaded_ids = []
+
+                        # Loop Upload Images
+                        for i, img_bytes in enumerate(st.session_state.rider_photo_gallery):
+                            # Name: Plate_DateTime_1.jpg
+                            fn = f"{lp_clean}_{ts}_{i+1}.jpg"
+                            uid = upload_photo(srv, img_bytes, fn, daily_fid)
+                            uploaded_ids.append(uid)
+                        
+                        # Loop Save Logs (Using List of UIDs)
+                        for order in st.session_state.rider_scanned_orders:
+                            target_ord_id = order['id']
+                            save_rider_log(
+                                st.session_state.current_user_name, 
+                                target_ord_id, 
+                                uploaded_ids, # Pass List
+                                daily_fname, 
+                                rider_lp_val
                             )
-                            time.sleep(2)
-                            trigger_reset(); st.rerun()
+                        
+                        st.markdown(
+                            """
+                            <div style="text-align: center;">
+                                <div style="font-size: 100px;">✅</div>
+                                <h2 style="color: #28a745; margin-top: -20px;">บันทึกครบถ้วน!</h2>
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
+                        time.sleep(2)
+                        trigger_reset(); st.rerun()
         else:
-            st.info("👈 กรุณาสแกน Order อย่างน้อย 1 รายการ")
+            st.info("👈 Scan Tracking อย่างน้อย 1 รายการ")
