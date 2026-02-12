@@ -126,7 +126,7 @@ def authenticate_drive():
         st.error(f"Error Drive: {e}")
         return None
 
-# --- GOOGLE SERVICES (UPDATED: FIX DUPLICATE COLUMNS) ---
+# --- GOOGLE SERVICES ---
 @st.cache_data(ttl=600)
 def load_sheet_data(sheet_name, spreadsheet_key): 
     try:
@@ -215,7 +215,8 @@ def load_rider_history():
         return []
 
 # --- MANAGE USERS FUNCTIONS ---
-def add_new_user_to_sheet(user_id, password, name):
+# [UPDATED] รับ Role เพิ่มเข้ามา
+def add_new_user_to_sheet(user_id, password, name, role):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds)
         sh = gc.open_by_key(ORDER_CHECK_SHEET_ID)
@@ -226,10 +227,11 @@ def add_new_user_to_sheet(user_id, password, name):
             if cell: return False, f"❌ ID {user_id} มีอยู่ในระบบแล้ว"
         except:
             pass 
-            
-        ws.append_row([str(user_id), str(password), str(name)])
+        
+        # เพิ่ม Role ลงใน Column ที่ 4
+        ws.append_row([str(user_id), str(password), str(name), str(role)])
         load_sheet_data.clear() 
-        return True, f"✅ เพิ่มพนักงาน {name} เรียบร้อย"
+        return True, f"✅ เพิ่มพนักงาน {name} ({role}) เรียบร้อย"
     except Exception as e:
         return False, f"Error: {e}"
 
@@ -395,7 +397,7 @@ def check_and_execute_reset():
         st.session_state.rider_input_reset_key += 1 
 
 def logout_user():
-    st.session_state.current_user_name = ""; st.session_state.current_user_id = ""
+    st.session_state.current_user_name = ""; st.session_state.current_user_id = ""; st.session_state.current_user_role = ""
     trigger_reset(); st.rerun()
 
 # --- CALLBACKS ---
@@ -423,10 +425,12 @@ def init_session_state():
     if 'rider_input_reset_key' not in st.session_state: st.session_state.rider_input_reset_key = 0
     if 'scan_status_msg' not in st.session_state: st.session_state.scan_status_msg = None
 
-    # [NEW] Session state for Add User inputs
     if 'add_user_id' not in st.session_state: st.session_state.add_user_id = ""
     if 'add_user_name' not in st.session_state: st.session_state.add_user_name = ""
     if 'add_user_pass' not in st.session_state: st.session_state.add_user_pass = ""
+
+    # [NEW] Role State
+    if 'current_user_role' not in st.session_state: st.session_state.current_user_role = ""
 
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
@@ -465,13 +469,24 @@ if not st.session_state.current_user_name:
             if not df_users.empty and len(df_users.columns) >= 3:
                 match = df_users[df_users.iloc[:, 0].astype(str) == str(user_input_val)]
                 if not match.empty:
-                    st.session_state.temp_login_user = {'id': str(user_input_val), 'pass': str(match.iloc[0, 1]).strip(), 'name': match.iloc[0, 2]}
+                    # [UPDATED] Check for Role (Column 4 if exists)
+                    user_role = 'staff'
+                    if len(match.columns) >= 4:
+                        val = str(match.iloc[0, 3]).strip().lower()
+                        if val == 'admin': user_role = 'admin'
+
+                    st.session_state.temp_login_user = {
+                        'id': str(user_input_val), 
+                        'pass': str(match.iloc[0, 1]).strip(), 
+                        'name': match.iloc[0, 2],
+                        'role': user_role
+                    }
                     st.rerun()
                 else: st.error(f"❌ ไม่พบรหัสพนักงาน: {user_input_val}")
             else: st.warning("⚠️ โหลดข้อมูลพนักงานไม่ได้")
     else:
         user_info = st.session_state.temp_login_user
-        st.info(f"👤 พนักงาน: **{user_info['name']}** ({user_info['id']})")
+        st.info(f"👤 พนักงาน: **{user_info['name']}** ({user_info['role'].upper()})")
         password_input = st.text_input("🔑 กรุณากรอกรหัสผ่าน", type="password", key="login_pass_input").strip()
         c1, c2 = st.columns([1, 1])
         with c1:
@@ -479,6 +494,7 @@ if not st.session_state.current_user_name:
                 if password_input == user_info['pass']:
                     st.session_state.current_user_id = user_info['id']
                     st.session_state.current_user_name = user_info['name']
+                    st.session_state.current_user_role = user_info['role'] # [UPDATED] Store Role
                     st.session_state.temp_login_user = None
                     st.toast(f"ยินดีต้อนรับคุณ {user_info['name']} 👋", icon="✅")
                     time.sleep(1); st.rerun()
@@ -490,7 +506,15 @@ else:
     # --- LOGGED IN ---
     with st.sidebar:
         st.write(f"👤 **{st.session_state.current_user_name}**")
-        mode = st.radio("เลือกโหมดทำงาน:", ["📦 แผนกแพ็คสินค้า", "🚚 Scan ปิดตู้", "👥 จัดการพนักงาน"])
+        st.caption(f"Role: {st.session_state.current_user_role}")
+        
+        # [UPDATED] Menu Options based on Role
+        menu_options = ["📦 แผนกแพ็คสินค้า", "🚚 Scan ปิดตู้"]
+        if st.session_state.current_user_role == 'admin':
+            menu_options.append("👥 จัดการพนักงาน")
+            
+        mode = st.radio("เลือกโหมดทำงาน:", menu_options)
+        
         st.divider()
         if st.button("Logout", type="secondary"): logout_user()
 
@@ -841,21 +865,22 @@ else:
         with col_add:
             st.subheader("➕ เพิ่มพนักงานใหม่")
             with st.form("add_user_form"):
-                # [UPDATED] ใช้ session_state ควบคุมค่าใน Input
                 new_id = st.text_input("รหัสพนักงาน (ID)", placeholder="เช่น 001", key="input_new_id").strip()
                 new_name = st.text_input("ชื่อ-นามสกุล", placeholder="เช่น สมชาย ใจดี", key="input_new_name").strip()
                 new_pass = st.text_input("รหัสผ่าน (Password)", type="password", key="input_new_pass").strip()
+                
+                # [NEW] Add Role Selector
+                role_option = st.selectbox("สิทธิ์การใช้งาน (Role)", ["staff", "admin"], key="input_new_role")
                 
                 submitted_add = st.form_submit_button("บันทึกข้อมูล", type="primary", use_container_width=True)
                 
                 if submitted_add:
                     if new_id and new_name and new_pass:
-                        success, msg = add_new_user_to_sheet(new_id, new_pass, new_name)
+                        success, msg = add_new_user_to_sheet(new_id, new_pass, new_name, role_option)
                         if success:
                             st.success(msg)
                             time.sleep(1)
-                            st.rerun() # พอ Rerun ค่าใน text_input ที่ไม่ได้ผูก value="" จะถูกรีเซ็ต (แต่ถ้าผูก value ต้องจัดการอีกแบบ)
-                            # ใน Streamlit ฟอร์มจะเคลียร์ค่าเองเมื่อ submit และ rerun ถ้าไม่ได้กำหนด value ถาวร
+                            st.rerun() 
                         else:
                             st.error(msg)
                     else:
@@ -886,7 +911,7 @@ else:
         
         st.divider()
         
-        # --- [UPDATED] MOVED TABLE TO BOTTOM ---
+        # --- MOVED TABLE TO BOTTOM ---
         st.subheader("📋 รายชื่อพนักงานปัจจุบัน")
         if not df_users_manage.empty:
             st.dataframe(df_users_manage, use_container_width=True)
