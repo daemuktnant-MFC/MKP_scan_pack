@@ -396,7 +396,7 @@ check_and_execute_reset()
 # --- LOGIN ---
 if not st.session_state.current_user_name:
     st.title("🔐 Login พนักงาน")
-    df_users = load_sheet_data(USER_SHEET_NAME, LOG_SHEET_ID)
+    df_users = load_sheet_data(USER_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
     if st.session_state.temp_login_user is None:
         st.info("กรุณาสแกนรหัสพนักงาน")
