@@ -126,7 +126,7 @@ def authenticate_drive():
         st.error(f"Error Drive: {e}")
         return None
 
-# --- GOOGLE SERVICES ---
+# --- GOOGLE SERVICES (UPDATED: FIX DUPLICATE COLUMNS) ---
 @st.cache_data(ttl=600)
 def load_sheet_data(sheet_name, spreadsheet_key): 
     try:
@@ -149,21 +149,35 @@ def load_sheet_data(sheet_name, spreadsheet_key):
         
         rows = worksheet.get_all_values()
         if len(rows) > 1:
-            headers = rows[0]; data = rows[1:]
-            df = pd.DataFrame(data, columns=headers)
-            df.columns = df.columns.str.strip()
+            headers = rows[0]
+            data = rows[1:]
+
+            # [FIX] จัดการชื่อคอลัมน์ซ้ำ (Deduplicate Columns)
+            seen = {}
+            unique_headers = []
+            for col in headers:
+                clean_col = col.strip()
+                if not clean_col: clean_col = "Untitled" # ตั้งชื่อให้ช่องว่าง
+                
+                if clean_col in seen:
+                    seen[clean_col] += 1
+                    unique_headers.append(f"{clean_col}_{seen[clean_col]}")
+                else:
+                    seen[clean_col] = 0
+                    unique_headers.append(clean_col)
+
+            df = pd.DataFrame(data, columns=unique_headers)
             
             # Normalize column names
             for col in df.columns:
-                col_clean = col.strip()
-                col_lower = col_clean.lower()
+                col_lower = col.lower()
                 
                 if 'tracking' in col_lower or ('order' in col_lower and 'id' in col_lower): 
                     df.rename(columns={col: 'Tracking'}, inplace=True)
                 elif 'barcode' in col_lower:
                     df.rename(columns={col: 'Barcode'}, inplace=True)
                     df['Barcode'] = df['Barcode'].astype(str).str.replace(r'\.0$', '', regex=True)
-                elif col_clean == 'Name' or 'product name' in col_lower:
+                elif col == 'Name' or 'product name' in col_lower:
                      df.rename(columns={col: 'Product Name'}, inplace=True)
                 elif 'qty' in col_lower or 'quantity' in col_lower:
                      df.rename(columns={col: 'Qty'}, inplace=True)
@@ -200,7 +214,7 @@ def load_rider_history():
     except:
         return []
 
-# --- [NEW] MANAGE USERS FUNCTIONS ---
+# --- MANAGE USERS FUNCTIONS ---
 def add_new_user_to_sheet(user_id, password, name):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds)
@@ -208,9 +222,11 @@ def add_new_user_to_sheet(user_id, password, name):
         ws = sh.worksheet(USER_SHEET_NAME)
         
         # Check duplicate ID
-        cell = ws.find(str(user_id))
-        if cell:
-            return False, f"❌ ID {user_id} มีอยู่ในระบบแล้ว"
+        try:
+            cell = ws.find(str(user_id))
+            if cell: return False, f"❌ ID {user_id} มีอยู่ในระบบแล้ว"
+        except:
+            pass # ถ้าหาไม่เจอหรือ Error ให้ถือว่าไม่มีซ้ำ
             
         ws.append_row([str(user_id), str(password), str(name)])
         load_sheet_data.clear() # Clear Cache
@@ -224,12 +240,15 @@ def delete_user_from_sheet(user_id):
         sh = gc.open_by_key(ORDER_CHECK_SHEET_ID)
         ws = sh.worksheet(USER_SHEET_NAME)
         
-        cell = ws.find(str(user_id))
-        if cell:
-            ws.delete_rows(cell.row)
-            load_sheet_data.clear() # Clear Cache
-            return True, f"✅ ลบ ID {user_id} เรียบร้อย"
-        else:
+        try:
+            cell = ws.find(str(user_id))
+            if cell:
+                ws.delete_rows(cell.row)
+                load_sheet_data.clear() # Clear Cache
+                return True, f"✅ ลบ ID {user_id} เรียบร้อย"
+            else:
+                return False, f"❌ ไม่พบ ID {user_id}"
+        except:
             return False, f"❌ ไม่พบ ID {user_id}"
     except Exception as e:
         return False, f"Error: {e}"
@@ -423,6 +442,7 @@ check_and_execute_reset()
 # --- LOGIN ---
 if not st.session_state.current_user_name:
     st.title("🔐 Login พนักงาน")
+    # [UPDATED] ใช้ไฟล์ใหม่ (ORDER_CHECK_SHEET_ID) สำหรับโหลดข้อมูล User
     df_users = load_sheet_data(USER_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
     if st.session_state.temp_login_user is None:
@@ -467,7 +487,6 @@ else:
     # --- LOGGED IN ---
     with st.sidebar:
         st.write(f"👤 **{st.session_state.current_user_name}**")
-        # [UPDATED] เพิ่มเมนูจัดการพนักงาน
         mode = st.radio("เลือกโหมดทำงาน:", ["📦 แผนกแพ็คสินค้า", "🚚 Scan ปิดตู้", "👥 จัดการพนักงาน"])
         st.divider()
         if st.button("Logout", type="secondary"): logout_user()
@@ -852,20 +871,23 @@ else:
             
             if not df_users_manage.empty:
                 # สร้าง list สำหรับ Dropdown: "ID: Name"
-                user_options = df_users_manage.apply(lambda x: f"{x.iloc[0]}: {x.iloc[2]}", axis=1).tolist()
-                
-                selected_user_str = st.selectbox("เลือกพนักงานที่ต้องการลบ", user_options)
-                
-                if st.button("ยืนยันการลบ", type="secondary", use_container_width=True):
-                    # แยก ID ออกจาก String
-                    target_id = selected_user_str.split(":")[0]
+                # ต้องตรวจสอบว่ามีคอลัมน์ครบมั้ย
+                if len(df_users_manage.columns) >= 3:
+                     user_options = df_users_manage.apply(lambda x: f"{x.iloc[0]}: {x.iloc[2]}", axis=1).tolist()
+                     selected_user_str = st.selectbox("เลือกพนักงานที่ต้องการลบ", user_options)
                     
-                    success, msg = delete_user_from_sheet(target_id)
-                    if success:
-                        st.success(msg)
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error(msg)
+                     if st.button("ยืนยันการลบ", type="secondary", use_container_width=True):
+                         # แยก ID ออกจาก String
+                         target_id = selected_user_str.split(":")[0]
+                         
+                         success, msg = delete_user_from_sheet(target_id)
+                         if success:
+                             st.success(msg)
+                             time.sleep(1)
+                             st.rerun()
+                         else:
+                             st.error(msg)
+                else:
+                    st.error("ข้อมูลพนักงานไม่ถูกต้อง (คอลัมน์ไม่ครบ)")
             else:
                 st.info("ไม่มีข้อมูลให้ลบ")
