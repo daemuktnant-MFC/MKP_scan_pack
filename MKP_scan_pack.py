@@ -810,6 +810,9 @@ else:
     elif mode == "👥 จัดการพนักงาน":
         st.title("👥 จัดการพนักงาน (Add/Delete)")
         
+        # Load current users
+        df_users_manage = load_sheet_data(USER_SHEET_NAME, ORDER_CHECK_SHEET_ID)
+        
         # Show Current Users Table
         st.subheader("📋 รายชื่อพนักงานปัจจุบัน")
         if not df_users_manage.empty:
@@ -820,9 +823,6 @@ else:
         st.divider()
 
         col_add, col_del = st.columns([1, 1])
-        
-        # Load current users
-        df_users_manage = load_sheet_data(USER_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
         # --- SECTION: ADD USER ---
         with col_add:
