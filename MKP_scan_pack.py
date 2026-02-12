@@ -24,10 +24,10 @@ except ImportError:
 st.markdown(
     """
     <style>
-    h1 { font-size: 14px !important; } 
-    h2 { font-size: 12px !important; } 
-    h3 { font-size: 10px !important; } 
-    h4 { font-size: 9px !important; } 
+    h1 { font-size: 18px !important; } 
+    h2 { font-size: 16px !important; } 
+    h3 { font-size: 14px !important; } 
+    h4 { font-size: 13px !important; } 
     
     iframe[title="streamlit_back_camera_input.back_camera_input"] {
         min-height: 450px !important; 
@@ -215,18 +215,16 @@ def load_rider_history():
         return []
 
 # --- MANAGE USERS FUNCTIONS ---
-# [UPDATED] รับ Role เพิ่มเข้ามา
 def add_new_user_to_sheet(user_id, password, name, role):
     try:
         creds = get_credentials(); gc = gspread.authorize(creds)
         sh = gc.open_by_key(ORDER_CHECK_SHEET_ID)
         ws = sh.worksheet(USER_SHEET_NAME)
         
-        try:
-            cell = ws.find(str(user_id))
-            if cell: return False, f"❌ ID {user_id} มีอยู่ในระบบแล้ว"
-        except:
-            pass 
+        # [UPDATED FIX] ตรวจสอบ ID ซ้ำ โดยการดึง Column 1 ทั้งหมดมาเช็ค
+        existing_ids = ws.col_values(1) # อ่านค่าทั้งหมดในคอลัมน์ A (ID)
+        if str(user_id) in existing_ids:
+            return False, f"❌ ID {user_id} มีอยู่ในระบบแล้ว (ห้ามซ้ำ)"
         
         # เพิ่ม Role ลงใน Column ที่ 4
         ws.append_row([str(user_id), str(password), str(name), str(role)])
@@ -469,7 +467,7 @@ if not st.session_state.current_user_name:
             if not df_users.empty and len(df_users.columns) >= 3:
                 match = df_users[df_users.iloc[:, 0].astype(str) == str(user_input_val)]
                 if not match.empty:
-                    # [UPDATED] Check for Role (Column 4 if exists)
+                    # Check for Role (Column 4 if exists)
                     user_role = 'staff'
                     if len(match.columns) >= 4:
                         val = str(match.iloc[0, 3]).strip().lower()
@@ -494,7 +492,7 @@ if not st.session_state.current_user_name:
                 if password_input == user_info['pass']:
                     st.session_state.current_user_id = user_info['id']
                     st.session_state.current_user_name = user_info['name']
-                    st.session_state.current_user_role = user_info['role'] # [UPDATED] Store Role
+                    st.session_state.current_user_role = user_info['role'] 
                     st.session_state.temp_login_user = None
                     st.toast(f"ยินดีต้อนรับคุณ {user_info['name']} 👋", icon="✅")
                     time.sleep(1); st.rerun()
@@ -694,7 +692,7 @@ else:
     # ================= MODE 2: RIDER =================
     elif mode == "🚚 Scan ปิดตู้":
         st.title("🚚 Scan ปิดตู้")
-        st.info("1. สแกน Tracking\n2. ถ่ายรูปปิดตู้ \n*รูปจะถูกบันทึกใน Folder วันที่ และ Link จะถูกบันทึกให้ทุก Tracking*")
+        #st.info("1. สแกน Tracking\n2. ถ่ายรูปปิดตู้ \n*รูปจะถูกบันทึกใน Folder วันที่ และ Link จะถูกบันทึกให้ทุก Tracking*")
         
         # Load Order Data for Validation
         df_order_data_rider = load_sheet_data(ORDER_DATA_SHEET_NAME, ORDER_CHECK_SHEET_ID)
@@ -869,16 +867,21 @@ else:
                 new_name = st.text_input("ชื่อ-นามสกุล", placeholder="เช่น สมชาย ใจดี", key="input_new_name").strip()
                 new_pass = st.text_input("รหัสผ่าน (Password)", type="password", key="input_new_pass").strip()
                 
-                # [NEW] Add Role Selector
+                # [UPDATED FIX] Add Role Selector
                 role_option = st.selectbox("สิทธิ์การใช้งาน (Role)", ["staff", "admin"], key="input_new_role")
                 
                 submitted_add = st.form_submit_button("บันทึกข้อมูล", type="primary", use_container_width=True)
                 
                 if submitted_add:
                     if new_id and new_name and new_pass:
+                        # Pass 'role' to function
                         success, msg = add_new_user_to_sheet(new_id, new_pass, new_name, role_option)
                         if success:
                             st.success(msg)
+                            # [UPDATED FIX] Clear Input
+                            st.session_state["input_new_id"] = ""
+                            st.session_state["input_new_name"] = ""
+                            st.session_state["input_new_pass"] = ""
                             time.sleep(1)
                             st.rerun() 
                         else:
