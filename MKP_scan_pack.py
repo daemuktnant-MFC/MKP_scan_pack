@@ -152,12 +152,12 @@ def load_sheet_data(sheet_name, spreadsheet_key):
             headers = rows[0]
             data = rows[1:]
 
-            # [FIX] จัดการชื่อคอลัมน์ซ้ำ (Deduplicate Columns)
+            # [FIX] Deduplicate Columns
             seen = {}
             unique_headers = []
             for col in headers:
                 clean_col = col.strip()
-                if not clean_col: clean_col = "Untitled" # ตั้งชื่อให้ช่องว่าง
+                if not clean_col: clean_col = "Untitled" 
                 
                 if clean_col in seen:
                     seen[clean_col] += 1
@@ -221,15 +221,14 @@ def add_new_user_to_sheet(user_id, password, name):
         sh = gc.open_by_key(ORDER_CHECK_SHEET_ID)
         ws = sh.worksheet(USER_SHEET_NAME)
         
-        # Check duplicate ID
         try:
             cell = ws.find(str(user_id))
             if cell: return False, f"❌ ID {user_id} มีอยู่ในระบบแล้ว"
         except:
-            pass # ถ้าหาไม่เจอหรือ Error ให้ถือว่าไม่มีซ้ำ
+            pass 
             
         ws.append_row([str(user_id), str(password), str(name)])
-        load_sheet_data.clear() # Clear Cache
+        load_sheet_data.clear() 
         return True, f"✅ เพิ่มพนักงาน {name} เรียบร้อย"
     except Exception as e:
         return False, f"Error: {e}"
@@ -244,7 +243,7 @@ def delete_user_from_sheet(user_id):
             cell = ws.find(str(user_id))
             if cell:
                 ws.delete_rows(cell.row)
-                load_sheet_data.clear() # Clear Cache
+                load_sheet_data.clear() 
                 return True, f"✅ ลบ ID {user_id} เรียบร้อย"
             else:
                 return False, f"❌ ไม่พบ ID {user_id}"
@@ -424,6 +423,11 @@ def init_session_state():
     if 'rider_input_reset_key' not in st.session_state: st.session_state.rider_input_reset_key = 0
     if 'scan_status_msg' not in st.session_state: st.session_state.scan_status_msg = None
 
+    # [NEW] Session state for Add User inputs
+    if 'add_user_id' not in st.session_state: st.session_state.add_user_id = ""
+    if 'add_user_name' not in st.session_state: st.session_state.add_user_name = ""
+    if 'add_user_pass' not in st.session_state: st.session_state.add_user_pass = ""
+
     keys = ['current_user_name', 'current_user_id', 'order_val', 'prod_val', 'loc_val', 'prod_display_name', 
             'photo_gallery', 'cam_counter', 'pick_qty', 'rider_photo', 'current_order_items', 'picking_phase', 'temp_login_user',
             'target_rider_folder_id', 'target_rider_folder_name', 'rider_lp_val']
@@ -442,7 +446,6 @@ check_and_execute_reset()
 # --- LOGIN ---
 if not st.session_state.current_user_name:
     st.title("🔐 Login พนักงาน")
-    # [UPDATED] ใช้ไฟล์ใหม่ (ORDER_CHECK_SHEET_ID) สำหรับโหลดข้อมูล User
     df_users = load_sheet_data(USER_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
     if st.session_state.temp_login_user is None:
@@ -832,24 +835,16 @@ else:
         # Load current users
         df_users_manage = load_sheet_data(USER_SHEET_NAME, ORDER_CHECK_SHEET_ID)
         
-        # Show Current Users Table
-        st.subheader("📋 รายชื่อพนักงานปัจจุบัน")
-        if not df_users_manage.empty:
-            st.dataframe(df_users_manage, use_container_width=True)
-        else:
-            st.warning("ไม่พบข้อมูลพนักงาน")
-        
-        st.divider()
-
         col_add, col_del = st.columns([1, 1])
 
         # --- SECTION: ADD USER ---
         with col_add:
             st.subheader("➕ เพิ่มพนักงานใหม่")
             with st.form("add_user_form"):
-                new_id = st.text_input("รหัสพนักงาน (ID)", placeholder="เช่น 001").strip()
-                new_name = st.text_input("ชื่อ-นามสกุล", placeholder="เช่น สมชาย ใจดี").strip()
-                new_pass = st.text_input("รหัสผ่าน (Password)", type="password").strip()
+                # [UPDATED] ใช้ session_state ควบคุมค่าใน Input
+                new_id = st.text_input("รหัสพนักงาน (ID)", placeholder="เช่น 001", key="input_new_id").strip()
+                new_name = st.text_input("ชื่อ-นามสกุล", placeholder="เช่น สมชาย ใจดี", key="input_new_name").strip()
+                new_pass = st.text_input("รหัสผ่าน (Password)", type="password", key="input_new_pass").strip()
                 
                 submitted_add = st.form_submit_button("บันทึกข้อมูล", type="primary", use_container_width=True)
                 
@@ -859,7 +854,8 @@ else:
                         if success:
                             st.success(msg)
                             time.sleep(1)
-                            st.rerun()
+                            st.rerun() # พอ Rerun ค่าใน text_input ที่ไม่ได้ผูก value="" จะถูกรีเซ็ต (แต่ถ้าผูก value ต้องจัดการอีกแบบ)
+                            # ใน Streamlit ฟอร์มจะเคลียร์ค่าเองเมื่อ submit และ rerun ถ้าไม่ได้กำหนด value ถาวร
                         else:
                             st.error(msg)
                     else:
@@ -870,16 +866,12 @@ else:
             st.subheader("🗑️ ลบพนักงาน")
             
             if not df_users_manage.empty:
-                # สร้าง list สำหรับ Dropdown: "ID: Name"
-                # ต้องตรวจสอบว่ามีคอลัมน์ครบมั้ย
                 if len(df_users_manage.columns) >= 3:
                      user_options = df_users_manage.apply(lambda x: f"{x.iloc[0]}: {x.iloc[2]}", axis=1).tolist()
                      selected_user_str = st.selectbox("เลือกพนักงานที่ต้องการลบ", user_options)
                     
                      if st.button("ยืนยันการลบ", type="secondary", use_container_width=True):
-                         # แยก ID ออกจาก String
                          target_id = selected_user_str.split(":")[0]
-                         
                          success, msg = delete_user_from_sheet(target_id)
                          if success:
                              st.success(msg)
@@ -891,3 +883,12 @@ else:
                     st.error("ข้อมูลพนักงานไม่ถูกต้อง (คอลัมน์ไม่ครบ)")
             else:
                 st.info("ไม่มีข้อมูลให้ลบ")
+        
+        st.divider()
+        
+        # --- [UPDATED] MOVED TABLE TO BOTTOM ---
+        st.subheader("📋 รายชื่อพนักงานปัจจุบัน")
+        if not df_users_manage.empty:
+            st.dataframe(df_users_manage, use_container_width=True)
+        else:
+            st.warning("ไม่พบข้อมูลพนักงาน")
