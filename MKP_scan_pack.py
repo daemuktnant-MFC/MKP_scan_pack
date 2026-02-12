@@ -11,7 +11,7 @@ import io
 import time
 from googleapiclient.errors import HttpError
 import json
-import base64 # [ADDED] เพิ่ม library นี้
+import base64
 
 # --- IMPORT LIBRARY กล้อง ---
 try:
@@ -50,7 +50,7 @@ MAIN_FOLDER_ID = '1sZQKOuw4YGazuy4euk4ns7nLr7Zie6cm'
 # 1. ไฟล์สำหรับบันทึก Log (ปลายทาง)
 LOG_SHEET_ID = '1tZfX9I6Ntbo-Jf2_rcqBc2QYUrCCCSAx8K4YBkly92c' 
 
-# 2. ไฟล์สำหรับตรวจสอบ Order Data (ต้นทาง)
+# 2. ไฟล์สำหรับตรวจสอบ Order Data (ต้นทาง) และ [User Data]
 ORDER_CHECK_SHEET_ID = '1Om9qwShA3hBQgKJPQNbJgDPInm9AQ2hY5Z8OuOpkF08' 
 
 ORDER_DATA_SHEET_NAME = 'Order_Data'
@@ -58,16 +58,14 @@ LOG_SHEET_NAME = 'Logs'
 RIDER_SHEET_NAME = 'Rider_Logs'
 USER_SHEET_NAME = 'User'
 
-# --- [UPDATED] SOUND HELPER (เล่นไฟล์ในเครื่อง) ---
+# --- SOUND HELPER ---
 def play_sound(status='success'):
-    # กำหนดชื่อไฟล์เสียงที่ต้องการ (ต้องวางไฟล์ไว้ที่เดียวกับ Code)
     sound_files = {
-        'scan': 'beep.mp3',       # เสียงติ๊ดเดียว
-        'success': 'success.mp3', # เสียงสำเร็จ
-        'error': 'error.mp3'      # เสียง Error
+        'scan': 'beep.mp3',       
+        'success': 'success.mp3', 
+        'error': 'error.mp3'      
     }
     
-    # กำหนด Link สำรอง (กรณีหาไฟล์ในเครื่องไม่เจอ)
     backup_urls = {
         'scan': "https://www.myinstants.com/media/sounds/barcode-scanner-beep-sound.mp3",
         'success': "https://www.myinstants.com/media/sounds/success-sound-effect.mp3",
@@ -77,12 +75,9 @@ def play_sound(status='success'):
     target_file = sound_files.get(status, 'beep.mp3')
     
     try:
-        # 1. พยายามอ่านไฟล์จากเครื่อง (Local File)
         with open(target_file, "rb") as f:
             data = f.read()
             b64 = base64.b64encode(data).decode()
-            
-            # ฝัง Base64 ลงใน HTML
             md = f"""
                 <audio autoplay>
                 <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
@@ -91,8 +86,6 @@ def play_sound(status='success'):
             st.markdown(md, unsafe_allow_html=True)
             
     except FileNotFoundError:
-        # 2. ถ้าไม่เจอไฟล์ในเครื่อง -> ใช้ Link สำรองแทน (Fallback)
-        # st.warning(f"⚠️ ไม่พบไฟล์ {target_file} ใช้เสียงออนไลน์แทน") # ปิดไว้จะได้ไม่รก
         sound_url = backup_urls.get(status, backup_urls['scan'])
         st.markdown(f"""
             <audio autoplay>
@@ -206,6 +199,40 @@ def load_rider_history():
         return []
     except:
         return []
+
+# --- [NEW] MANAGE USERS FUNCTIONS ---
+def add_new_user_to_sheet(user_id, password, name):
+    try:
+        creds = get_credentials(); gc = gspread.authorize(creds)
+        sh = gc.open_by_key(ORDER_CHECK_SHEET_ID)
+        ws = sh.worksheet(USER_SHEET_NAME)
+        
+        # Check duplicate ID
+        cell = ws.find(str(user_id))
+        if cell:
+            return False, f"❌ ID {user_id} มีอยู่ในระบบแล้ว"
+            
+        ws.append_row([str(user_id), str(password), str(name)])
+        load_sheet_data.clear() # Clear Cache
+        return True, f"✅ เพิ่มพนักงาน {name} เรียบร้อย"
+    except Exception as e:
+        return False, f"Error: {e}"
+
+def delete_user_from_sheet(user_id):
+    try:
+        creds = get_credentials(); gc = gspread.authorize(creds)
+        sh = gc.open_by_key(ORDER_CHECK_SHEET_ID)
+        ws = sh.worksheet(USER_SHEET_NAME)
+        
+        cell = ws.find(str(user_id))
+        if cell:
+            ws.delete_rows(cell.row)
+            load_sheet_data.clear() # Clear Cache
+            return True, f"✅ ลบ ID {user_id} เรียบร้อย"
+        else:
+            return False, f"❌ ไม่พบ ID {user_id}"
+    except Exception as e:
+        return False, f"Error: {e}"
 
 # --- TIME HELPER ---
 def get_thai_time(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
@@ -440,7 +467,8 @@ else:
     # --- LOGGED IN ---
     with st.sidebar:
         st.write(f"👤 **{st.session_state.current_user_name}**")
-        mode = st.radio("เลือกโหมดทำงาน:", ["📦 แผนกแพ็คสินค้า", "🚚 Scan ปิดตู้"])
+        # [UPDATED] เพิ่มเมนูจัดการพนักงาน
+        mode = st.radio("เลือกโหมดทำงาน:", ["📦 แผนกแพ็คสินค้า", "🚚 Scan ปิดตู้", "👥 จัดการพนักงาน"])
         st.divider()
         if st.button("Logout", type="secondary"): logout_user()
 
@@ -478,12 +506,10 @@ else:
                         try:
                             matches = df_order_data[df_order_data['Tracking'] == st.session_state.order_val]
                             
-                            # [UPDATED] STRICT VALIDATION MODE 1
                             if matches.empty:
                                 play_sound('error')
                                 st.error(f"⛔ ไม่พบ Tracking: {st.session_state.order_val} ในระบบ! (กรุณาตรวจสอบ)")
                                 time.sleep(2)
-                                # Force Reset Logic
                                 st.session_state.order_val = ""
                                 st.rerun()
                             else:
@@ -622,9 +648,9 @@ else:
     # ================= MODE 2: RIDER =================
     elif mode == "🚚 Scan ปิดตู้":
         st.title("🚚 Scan ปิดตู้")
-        # st.info("1. สแกน Tracking\n2. ถ่ายรูปปิดตู้ \n*รูปจะถูกบันทึกใน Folder วันที่ และ Link จะถูกบันทึกให้ทุก Tracking*")
+        st.info("1. สแกน Tracking\n2. ถ่ายรูปปิดตู้ \n*รูปจะถูกบันทึกใน Folder วันที่ และ Link จะถูกบันทึกให้ทุก Tracking*")
         
-        # [UPDATED] Load Order Data for Validation
+        # Load Order Data for Validation
         df_order_data_rider = load_sheet_data(ORDER_DATA_SHEET_NAME, ORDER_CHECK_SHEET_ID)
 
         # 0. ระบุทะเบียนรถ
@@ -638,7 +664,6 @@ else:
                 play_sound('error')
             else:
                 st.success(st.session_state.scan_status_msg['msg'])
-                # [UPDATED] เปลี่ยนเสียงตอน Scan Tracking เป็นแบบ scan (ติ๊ดเดียว)
                 if st.session_state.scan_status_msg['msg'].startswith("✅ เพิ่ม"):
                     play_sound('scan')
                 else:
@@ -671,7 +696,6 @@ else:
         if current_rider_order:
             existing_ids = [o['id'] for o in st.session_state.rider_scanned_orders]
             
-            # [UPDATED] STRICT VALIDATION MODE 2
             # Check if order exists in Master Data?
             valid_trackings = []
             if not df_order_data_rider.empty and 'Tracking' in df_order_data_rider.columns:
@@ -774,7 +798,6 @@ else:
                             target_ord_id = order['id']
                             save_rider_log(st.session_state.current_user_name, target_ord_id, uploaded_ids, daily_fname, rider_lp_val)
                         
-                        # [ADDED] Play Success Sound for Final Save
                         play_sound('success')
 
                         st.markdown("""<div style="text-align: center;"><div style="font-size: 100px;">✅</div><h2 style="color: #28a745; margin-top: -20px;">บันทึกครบถ้วน!</h2></div>""", unsafe_allow_html=True)
@@ -782,3 +805,67 @@ else:
                         trigger_reset(); st.rerun()
         else:
             st.info("👈 Scan Tracking อย่างน้อย 1 รายการ")
+            
+    # ================= MODE 3: MANAGE USERS =================
+    elif mode == "👥 จัดการพนักงาน":
+        st.title("👥 จัดการพนักงาน (Add/Delete)")
+        
+        # Load current users
+        df_users_manage = load_sheet_data(USER_SHEET_NAME, ORDER_CHECK_SHEET_ID)
+        
+        # Show Current Users Table
+        st.subheader("📋 รายชื่อพนักงานปัจจุบัน")
+        if not df_users_manage.empty:
+            st.dataframe(df_users_manage, use_container_width=True)
+        else:
+            st.warning("ไม่พบข้อมูลพนักงาน")
+        
+        st.divider()
+
+        col_add, col_del = st.columns([1, 1])
+
+        # --- SECTION: ADD USER ---
+        with col_add:
+            st.subheader("➕ เพิ่มพนักงานใหม่")
+            with st.form("add_user_form"):
+                new_id = st.text_input("รหัสพนักงาน (ID)", placeholder="เช่น 001").strip()
+                new_name = st.text_input("ชื่อ-นามสกุล", placeholder="เช่น สมชาย ใจดี").strip()
+                new_pass = st.text_input("รหัสผ่าน (Password)", type="password").strip()
+                
+                submitted_add = st.form_submit_button("บันทึกข้อมูล", type="primary", use_container_width=True)
+                
+                if submitted_add:
+                    if new_id and new_name and new_pass:
+                        success, msg = add_new_user_to_sheet(new_id, new_pass, new_name)
+                        if success:
+                            st.success(msg)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    else:
+                        st.warning("กรุณากรอกข้อมูลให้ครบถ้วน")
+
+        # --- SECTION: DELETE USER ---
+        with col_del:
+            st.subheader("🗑️ ลบพนักงาน")
+            
+            if not df_users_manage.empty:
+                # สร้าง list สำหรับ Dropdown: "ID: Name"
+                user_options = df_users_manage.apply(lambda x: f"{x.iloc[0]}: {x.iloc[2]}", axis=1).tolist()
+                
+                selected_user_str = st.selectbox("เลือกพนักงานที่ต้องการลบ", user_options)
+                
+                if st.button("ยืนยันการลบ", type="secondary", use_container_width=True):
+                    # แยก ID ออกจาก String
+                    target_id = selected_user_str.split(":")[0]
+                    
+                    success, msg = delete_user_from_sheet(target_id)
+                    if success:
+                        st.success(msg)
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            else:
+                st.info("ไม่มีข้อมูลให้ลบ")
