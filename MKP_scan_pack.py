@@ -472,7 +472,14 @@ if not st.session_state.current_user_name:
         
         if user_input_val:
             if not df_users.empty and len(df_users.columns) >= 3:
-                match = df_users[df_users.iloc[:, 0].astype(str) == str(user_input_val)]
+                # [UPDATED FIX] Case-Insensitive Login Logic
+                # 1. แปลง Input เป็นตัวเล็กและตัดช่องว่าง
+                clean_input_id = str(user_input_val).strip().lower()
+                
+                # 2. แปลงข้อมูลใน Excel (Column แรก) เป็นตัวเล็กและตัดช่องว่างเพื่อเทียบ
+                # df_users.iloc[:, 0] คือ Column ID
+                match = df_users[df_users.iloc[:, 0].astype(str).str.strip().str.lower() == clean_input_id]
+                
                 if not match.empty:
                     # Check for Role (Column 4 if exists)
                     user_role = 'staff'
@@ -481,7 +488,7 @@ if not st.session_state.current_user_name:
                         if val == 'admin': user_role = 'admin'
 
                     st.session_state.temp_login_user = {
-                        'id': str(user_input_val), 
+                        'id': str(match.iloc[0, 0]), # เก็บ ID จริงตามใน Sheet (ตัวเล็ก/ใหญ่ตามต้นฉบับ)
                         'pass': str(match.iloc[0, 1]).strip(), 
                         'name': match.iloc[0, 2],
                         'role': user_role
@@ -496,6 +503,7 @@ if not st.session_state.current_user_name:
         c1, c2 = st.columns([1, 1])
         with c1:
             if st.button("✅ ยืนยัน Login", type="primary", use_container_width=True):
+                # ตรวจ Password (ยังคงเป็น Case-Sensitive เพื่อความปลอดภัย)
                 if password_input == user_info['pass']:
                     st.session_state.current_user_id = user_info['id']
                     st.session_state.current_user_name = user_info['name']
