@@ -533,7 +533,7 @@ else:
 
     # ================= MODE 1: PACKING =================
     if mode == "📦 แผนกแพ็คสินค้า":
-        st.title("📦 ระบบเบิก-แพ็คสินค้า")
+        st.title("📦 ระบบแพ็คสินค้า")
         
         # Load Order Data
         df_order_data = load_sheet_data(ORDER_DATA_SHEET_NAME, ORDER_CHECK_SHEET_ID)
