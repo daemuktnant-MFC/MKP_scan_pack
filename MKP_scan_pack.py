@@ -565,6 +565,9 @@ else:
                         try:
                             matches = df_order_data[df_order_data['Tracking'] == st.session_state.order_val]
                             
+                            # [UPDATED] กรอง Barcode ซ้ำออก (เอาเฉพาะบรรทัดแรกที่เจอ)
+                            matches = matches.drop_duplicates(subset=['Barcode'], keep='first')
+                            
                             if matches.empty:
                                 play_sound('error')
                                 st.error(f"⛔ ไม่พบ Tracking: {st.session_state.order_val} ในระบบ! (กรุณาตรวจสอบ)")
@@ -579,7 +582,9 @@ else:
                 if st.session_state.expected_items:
                     st.info(f"📋 รายการสินค้าที่ต้องแพ็ค ({len(st.session_state.expected_items)} รายการ):")
                     exp_df = pd.DataFrame(st.session_state.expected_items)
-                    display_cols = ['Barcode', 'Product Name', 'Qty']
+                    
+                    # [UPDATED] เอา Qty ออกจากตารางแสดงผล
+                    display_cols = ['Barcode', 'Product Name'] # ลบ 'Qty' ออกแล้ว
                     valid_display_cols = [c for c in display_cols if c in exp_df.columns]
                     st.dataframe(exp_df[valid_display_cols], use_container_width=True)
 
@@ -603,15 +608,22 @@ else:
                                 break
                         
                         if found_item:
-                            new_item = {
-                                "Barcode": scanned_barcode,
-                                "Product Name": found_item.get('Product Name', 'Unknown'),
-                                "Location": found_item.get('Location', '-'),
-                                "Qty": 1
-                            }
-                            st.session_state.current_order_items.append(new_item)
-                            play_sound('success')
-                            st.toast(f"✅ ถูกต้อง! เพิ่ม {found_item.get('Product Name', '')}", icon="🛒")
+                            # เช็คว่าสแกนไปแล้วหรือยัง (ป้องกันรายการซ้ำใน List ที่สแกนแล้ว)
+                            already_scanned = any(x['Barcode'] == scanned_barcode for x in st.session_state.current_order_items)
+                            
+                            if not already_scanned:
+                                new_item = {
+                                    "Barcode": scanned_barcode,
+                                    "Product Name": found_item.get('Product Name', 'Unknown'),
+                                    "Location": found_item.get('Location', '-'),
+                                    # "Qty": 1 # ไม่แสดง Qty
+                                }
+                                st.session_state.current_order_items.append(new_item)
+                                play_sound('success')
+                                st.toast(f"✅ ถูกต้อง! เพิ่ม {found_item.get('Product Name', '')}", icon="🛒")
+                            else:
+                                st.toast(f"⚠️ สินค้านี้สแกนไปแล้ว", icon="ℹ️")
+                                
                             st.session_state.prod_val = ""
                             st.session_state.cam_counter += 1
                             st.rerun()
@@ -625,7 +637,10 @@ else:
                 if st.session_state.current_order_items:
                     st.markdown("---")
                     st.markdown(f"### 🛒 สินค้าที่แพ็คแล้ว ({len(st.session_state.current_order_items)} ชิ้น)")
-                    st.dataframe(pd.DataFrame(st.session_state.current_order_items), use_container_width=True)
+                    
+                    # [UPDATED] โชว์เฉพาะ Barcode กับ ชื่อสินค้า ในตารางสรุป
+                    st.dataframe(pd.DataFrame(st.session_state.current_order_items)[['Barcode', 'Product Name']], use_container_width=True)
+                    
                     st.button("✅ ยืนยันรายการครบแล้ว (ไปถ่ายรูป)", type="primary", use_container_width=True, on_click=go_to_pack_phase)
 
         elif st.session_state.picking_phase == 'pack':
