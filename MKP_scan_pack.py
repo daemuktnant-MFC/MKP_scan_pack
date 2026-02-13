@@ -645,8 +645,14 @@ else:
 
         elif st.session_state.picking_phase == 'pack':
             st.success(f"📦 Tracking: **{st.session_state.order_val}** (ยืนยันแล้ว)")
+            # [UPDATED] แสดงตารางแบบย่อ (ตัด Qty ออก)
             st.info("รายการสินค้าที่จะแพ็ค:")
-            st.dataframe(pd.DataFrame(st.session_state.current_order_items), use_container_width=True)
+            
+            # สร้างตารางโชว์เฉพาะ Barcode/Name
+            display_df = pd.DataFrame(st.session_state.current_order_items)
+            if not display_df.empty:
+                st.dataframe(display_df[['Barcode', 'Product Name']], use_container_width=True)
+            
             st.markdown("#### 3. ถ่ายรูปปิดกล่อง (รวมทุกชิ้น)")
             
             if st.session_state.photo_gallery:
@@ -695,13 +701,14 @@ else:
                                 if not final_image_link_id: final_image_link_id = "-"
 
                                 for item in st.session_state.current_order_items:
+                                    # [UPDATED FIX] ใช้ .get('Qty', '1') เพื่อกัน Error ถ้าไม่มีค่า Qty
                                     save_log_to_sheet(
                                         st.session_state.current_user_name, 
                                         st.session_state.order_val, 
                                         item['Barcode'], 
                                         item['Product Name'], 
                                         item['Location'], 
-                                        item['Qty'], 
+                                        item.get('Qty', '1'), # <-- จุดที่แก้: ถ้าไม่มี Qty ให้ใส่ '1'
                                         st.session_state.current_user_id, 
                                         final_image_link_id
                                     )
