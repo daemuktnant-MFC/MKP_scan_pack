@@ -182,14 +182,27 @@ def get_thai_time(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%
 def get_thai_date_str(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%d-%m-%Y")
 def get_thai_ts_filename(): return (datetime.utcnow() + timedelta(hours=7)).strftime("%Y%m%d_%H%M%S")
 
-# --- SAVE LOGS ---
-def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, file_id):
+# --- SAVE LOGS (UPDATED FOR MULTI-PHOTOS) ---
+def save_log_to_sheet(picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, file_id_or_list):
     try:
-        creds = get_credentials(); gc = gspread.authorize(creds); sh = gc.open_by_key(LOG_SHEET_ID) 
+        creds = get_credentials(); gc = gspread.authorize(creds)
+        sh = gc.open_by_key(LOG_SHEET_ID) 
         try: worksheet = sh.worksheet(LOG_SHEET_NAME)
         except: worksheet = sh.add_worksheet(title=LOG_SHEET_NAME, rows="1000", cols="20"); worksheet.append_row(["Timestamp", "Picker Name", "Order ID", "Barcode", "Product Name", "Location", "Pick Qty", "User", "Image Link (Col I)"])
-        timestamp = get_thai_time(); image_link = f"https://drive.google.com/open?id={file_id}"
+        
+        timestamp = get_thai_time()
+        
+        # [UPDATED] รองรับทั้ง ID เดียว และ List ของ ID
+        if isinstance(file_id_or_list, list):
+            # กรณีเป็น List ให้สร้าง Link หลายบรรทัด
+            links = [f"https://drive.google.com/open?id={fid}" for fid in file_id_or_list]
+            image_link = "\n".join(links)
+        else:
+            # กรณีเป็น ID เดียว
+            image_link = f"https://drive.google.com/open?id={file_id_or_list}"
+            
         worksheet.append_row([timestamp, picker_name, order_id, barcode, prod_name, location, pick_qty, user_col, image_link])
+        
     except Exception as e: st.warning(f"⚠️ บันทึก Log ไม่สำเร็จ: {e}")
 
 def save_rider_log(picker_name, order_id, file_ids_list, folder_name, license_plate="-"):
@@ -499,64 +512,108 @@ else:
         elif st.session_state.picking_phase == 'pack':
             st.success(f"📦 Tracking: **{st.session_state.order_val}** (ยืนยันรายการครบถ้วน)")
             st.info("📋 รายการสินค้าที่แพ็ค:")
+            
+            # โชว์ตารางสรุป
             display_df = pd.DataFrame(st.session_state.current_order_items)
-            if not display_df.empty: st.dataframe(display_df[['Barcode', 'Product Name']], use_container_width=True)
+            if not display_df.empty:
+                st.dataframe(display_df[['Barcode', 'Product Name']], use_container_width=True)
             
-            st.markdown("#### 3. ถ่ายวีดีโอปิดกล่อง")
+            st.markdown("---")
+            st.markdown("#### 3. 📸 ถ่ายรูปหลักฐาน (ถ่ายได้หลายรูป)")
             
-            # [NEW] ตัวเลือกคุณภาพวิดีโอ (Video Quality Selector)
-            st.session_state.video_quality = st.select_slider(
-                "ระดับคุณภาพวิดีโอ (อัปโหลด):",
-                options=['Low (360p)', 'Medium (480p)', 'High (720p)', 'Original (Max)'],
-                value='Original (Max)',
-                help="เลือกคุณภาพต่ำเพื่ออัปโหลดเร็วขึ้น (ระบบจะย่อไฟล์ก่อนส่ง)"
-            )
+            # --- ส่วนแสดง Gallery รูปที่ถ่ายไปแล้ว ---
+            if st.session_state.photo_gallery:
+                st.markdown(f"**รูปที่ถ่ายแล้ว ({len(st.session_state.photo_gallery)} รูป):**")
+                cols = st.columns(4) # แสดงแถวละ 4 รูป
+                for idx, img in enumerate(st.session_state.photo_gallery):
+                    with cols[idx % 4]:
+                        st.image(img, use_column_width=True)
+                        if st.button("🗑️ ลบ", key=f"del_pack_{idx}"):
+                            st.session_state.photo_gallery.pop(idx)
+                            st.rerun()
+                st.divider()
+
+            # --- กล้องถ่ายรูป ---
+            # จำกัดไม่เกิน 5 รูป (ปรับแก้ตัวเลขได้ตามต้องการ)
+            if len(st.session_state.photo_gallery) < 5:
+                col_cam1, col_cam2 = st.columns([3, 1])
+                with col_cam1:
+                    st.caption("แตะปุ่มด้านล่างเพื่อถ่ายรูป (เช่น รูปบิล, รูปสินค้า, รูปกล่อง)")
+                    pack_img = back_camera_input("ถ่ายรูปเพิ่ม (กล้องหลัง)", key=f"pack_cam_fin_{st.session_state.cam_counter}")
+                
+                if pack_img:
+                    # แปลงไฟล์ภาพและบันทึกลง Session
+                    img_pil = Image.open(pack_img)
+                    if img_pil.mode in ("RGBA", "P"): img_pil = img_pil.convert("RGB")
+                    buf = io.BytesIO(); img_pil.save(buf, format='JPEG', quality=90, optimize=True) # quality 90 ชัดและไฟล์ไม่ใหญ่
+                    st.session_state.photo_gallery.append(buf.getvalue())
+                    st.session_state.cam_counter += 1
+                    play_sound('scan') # เสียงชัตเตอร์ (ใช้เสียง scan แทน)
+                    st.rerun()
+            else:
+                st.info("✅ ถ่ายครบ 5 รูปแล้ว (ถ้าต้องการถ่ายใหม่ ให้ลบรูปเก่าออกก่อน)")
+
+            st.markdown("---")
             
-            st.warning(f"📱 โหมดปัจจุบัน: **{st.session_state.video_quality}**")
-            
-            uploaded_video = st.file_uploader("📹 แนบไฟล์วีดีโอ", type=['mp4', 'mov', 'webm', 'avi'])
-            if uploaded_video is not None: st.video(uploaded_video)
-            
+            # --- ปุ่ม Action ---
             col_b1, col_b2 = st.columns([1, 1])
             with col_b1:
-                if st.button("⬅️ กลับไปแก้ไขรายการ"): st.session_state.picking_phase = 'scan'; st.rerun()
+                if st.button("⬅️ กลับไปแก้ไขรายการ"): 
+                    st.session_state.picking_phase = 'scan'
+                    st.session_state.photo_gallery = []
+                    st.rerun()
+                    
             with col_b2:
-                if uploaded_video is not None:
+                # ปุ่มยืนยันจะกดได้ก็ต่อเมื่อมีรูปอย่างน้อย 1 รูป
+                if len(st.session_state.photo_gallery) > 0:
                     if not st.session_state.processing_pack:
-                        st.button("☁️ ยืนยัน Upload คลิป", type="primary", use_container_width=True, on_click=click_confirm_pack)
+                        st.button(f"☁️ ยืนยัน Upload ({len(st.session_state.photo_gallery)} รูป)", type="primary", use_container_width=True, on_click=click_confirm_pack)
                     else:
-                        st.info("⏳ กำลังประมวลผลและอัปโหลด... (อาจใช้เวลา)")
+                        st.info("⏳ กำลังอัปโหลด... (ห้ามปิดหน้าจอ)")
                     
                     if st.session_state.processing_pack:
-                        with st.spinner("🚀 กำลังทำงาน..."):
-                            
-                            # [NEW] Process Video Quality
-                            processed_video_bytes, status_msg = process_video_quality(uploaded_video, st.session_state.video_quality)
-                            
-                            if status_msg == "processed":
-                                st.toast("✅ ย่อขนาดวิดีโอสำเร็จ!", icon="✂️")
-
+                        with st.spinner("🚀 กำลังอัปโหลดรูปภาพ..."):
                             srv = authenticate_drive()
                             if srv:
                                 fid = get_target_folder_structure(srv, st.session_state.order_val, MAIN_FOLDER_ID)
                                 ts = get_thai_ts_filename()
-                                vid_name = f"{st.session_state.order_val}_VIDEO_{ts}.mp4"
+                                uploaded_ids = []
                                 
-                                # Upload
-                                video_link_id = upload_file_to_drive(srv, processed_video_bytes, vid_name, fid, 'video/mp4')
-                                if not video_link_id: video_link_id = "-"
+                                # Loop Upload ทุกรูปใน Gallery
+                                for i, img_bytes in enumerate(st.session_state.photo_gallery):
+                                    seq = i + 1
+                                    fn = f"{st.session_state.order_val}_PACKED_{ts}_{seq}.jpg"
+                                    uid = upload_photo(srv, img_bytes, fn, fid)
+                                    uploaded_ids.append(uid)
                                 
-                                # Save Log
+                                # บันทึก Log ลง Sheet (ส่ง List ของ ID ไป)
                                 for item in st.session_state.current_order_items:
                                     save_log_to_sheet(
-                                        st.session_state.current_user_name, st.session_state.order_val, 
-                                        item['Barcode'], item['Product Name'], item['Location'], item.get('Qty', '1'), 
-                                        st.session_state.current_user_id, video_link_id
+                                        st.session_state.current_user_name, 
+                                        st.session_state.order_val, 
+                                        item['Barcode'], 
+                                        item['Product Name'], 
+                                        item['Location'], 
+                                        item.get('Qty', '1'), 
+                                        st.session_state.current_user_id, 
+                                        uploaded_ids # [UPDATED] ส่งเป็น List
                                     )
                                     
                                 play_sound('success')
-                                st.markdown("""<div style="text-align: center;"><div style="font-size: 80px;">✅</div><h3 style="color: #28a745;">สำเร็จ!</h3></div>""", unsafe_allow_html=True)
-                                time.sleep(2); trigger_reset(); st.rerun()
+                                st.markdown(
+                                    """
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 80px;">✅</div>
+                                        <h3 style="color: #28a745; margin-top: -10px;">บันทึกสำเร็จ!</h3>
+                                    </div>
+                                    """, 
+                                    unsafe_allow_html=True
+                                )
+                                time.sleep(1.5)
+                                trigger_reset()
+                                st.rerun()
+                else:
+                    st.warning("⚠️ กรุณาถ่ายรูปอย่างน้อย 1 รูป")
 
     # ================= MODE 2: RIDER (NO CHANGE) =================
     elif mode == "🚚 Scan ปิดตู้":
