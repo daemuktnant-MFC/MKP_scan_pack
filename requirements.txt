@@ -9,3 +9,4 @@ pytz
 Pillow
 pyzbar
 streamlit-back-camera-input
+moviepy
